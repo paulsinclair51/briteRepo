@@ -1,12 +1,12 @@
-![briteTest Release v1.0.0](/docs/branding/Release_v1.0.0.png)
+![briteRepo Release v1.0.0](/docs/branding/Release_v1.0.0.png)
 
 #### Version: v1.0.0
 
-Release notes and verification guidance for the briteTest v1.0.0 release,
+Release notes and verification guidance for the briteRepo v1.0.0 release,
 including highlights, known limitations, retrieval options, and post-release
 validation steps.
 
-#### Copyright (c) 2026 Paul Sinclair
+#### Copyright (c) 2026 Paul Sinclair[text](../branding)
 
 <details>
 <summary><strong>License</strong></summary>
@@ -39,7 +39,7 @@ SOFTWARE.
 
 ## Preface
 
-This document summarizes the first stable public release of briteTest and
+This document summarizes the first stable public release of briteRepo and
 serves as the canonical release note reference for v1.0.0.
 
 <details>
@@ -83,9 +83,9 @@ serves as the canonical release note reference for v1.0.0.
 
 ## 1. Release Summary
 
-v1.0.0 marks the inaugural stable release of briteTest. This release represents
+v1.0.0 marks the inaugural stable release of briteRepo. This release represents
 the completion of the core framework, comprehensive documentation infrastructure
-, and full CI/CD pipeline setup. briteTest is now production-ready for testing automation workflows.
+, and full CI/CD pipeline setup. briteRepo is now production-ready for testing automation workflows.
 </details>
 
 <details>
@@ -97,7 +97,7 @@ the completion of the core framework, comprehensive documentation infrastructure
 <summary>&nbsp;&nbsp;&nbsp;&nbsp;2.1. Core Framework</summary>
 
 ### 2.1. Core Framework
-- Complete briteTest testing framework implementation
+- Complete briteRepo testing framework implementation
 - Full test execution engine with support for multiple test types
 - Comprehensive assertion library and test utilities
 - Runner system for distributed test execution
@@ -180,7 +180,7 @@ the completion of the core framework, comprehensive documentation infrastructure
 ### 4.1. GitHub Repository
 Access the v1.0.0 release directly from the main repository:
 ```
-https://github.com/paulsinclair51/briteTest
+https://github.com/paulsinclair51/briteRepo
 ```
 </details>
 
@@ -190,7 +190,7 @@ https://github.com/paulsinclair51/briteTest
 ### 4.2. Releases Page
 Navigate to the releases page for binary downloads and release notes:
 ```
-https://github.com/paulsinclair51/briteTest/releases/tag/v1.0.0
+https://github.com/paulsinclair51/briteRepo/releases/tag/v1.0.0
 ```
 </details>
 
@@ -200,7 +200,7 @@ https://github.com/paulsinclair51/briteTest/releases/tag/v1.0.0
 ### 4.3. Git Tags and Branches
 Clone and checkout the specific release:
 ```bash
-git clone https://github.com/paulsinclair51/briteTest.git
+git clone https://github.com/paulsinclair51/briteRepo.git
 git checkout v1.0.0
 ```
 

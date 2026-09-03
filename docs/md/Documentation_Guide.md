@@ -2,7 +2,7 @@
 
 #### Version: v1.0.0
 
-This document is a guide to the briteTest documentation and repository layout.
+This document is a guide to the briteRepo documentation and repository layout.
 
 #### Copyright (c) 2026 Paul Sinclair
 
@@ -38,8 +38,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## Preface
 
-This document is for users and contributors who need a guide to the
-documentation and repository layout.
+This document is for users who need a guide to the documentation
+and repository layout.
 
 A printer-friendly PDF file for this document is available.
 
@@ -112,20 +112,9 @@ The following are the user and contributor documents:
 
 - **Glossary_Reference.md**: An alphabetically ordered list of terms
   generally used in the documentation (emphasizing their specific meaning in
-  briteTest) and terms often used in the testing domain.
+  briteRepo) and terms often used in the testing domain.
 
-- **Guide.md** -- briteTest concepts and quick start example.
-
-- **Runner_Guide.md**: Concepts, usage, and examples for
-  the Runner Framework and API.
-
-- **Runner_Reference.md**: Reference document for the
-  Runner API.
-
-- **Test_Guide.md**: Concepts, usage, and examples for
-  the Test API.
-
-- **Test_Reference.md**: Reference document for the Test API.
+- **Guide.md** -- briteRepo concepts and quick start example.
 
 **Contributor documentation**:
 
@@ -157,37 +146,37 @@ The following shows the layout of the GitHub repository
 .github/workflows/ci.yml
 .vscode/
 .gitignore
-build_test_runner.ps1
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
 LICENSE
+MAINTAINERS.md
 Makefile
-README.md.              # Link to `<repo>/docs/md/Guide.md`,
+README.md               # Symbolic link to `<repo>/docs/md/Guide.md`,
+SECUTIRY.md
+briteRepo/              # Automation script assets.
+    bin/                  # Scripts (e.g., gendocs, mkbranch).
+    helpers/              # Helper scripts for bin/briteRepo/`*.
+    tests/                # Test scripts for testing bin/briteRepo.
 build/                  # Build outputs and related artifacts.
 config/                 # Repository configuration files.
-    contributors.md     # List of authorized contributors.
-    markdownlint.json   # Customize lint behavior.
+    contributors.md       # List of authorized contributors.
+    markdownlint.json     # Customize lint behavior.
 docs/                   # User and contributor documentation.
-    branding/           # Monograms, logos, and document title logos.
-    md/                 # `*.md` files (base/master documentation).
-    pdf/                # `*.pdf` files generated from `*.md` files.
-    docx/               # `*.docx` files generated from `*.pdf` files.
+    branding/             # Monograms, logos, and document title logos.
+    md/                   # `*.md` files (base/master documentation).
+    pdf/                  # `*.pdf` files generated from `*.md` files.
+    docx/                 # `*.docx` files generated from `*.pdf` files.
 examples/               # Usage examples.
 include/                # Public API `.h` headers.
-    runnerapi.h         # Declare Runner API
-    testapi.h           # Declare Test API
 reports/                # Generated report files.
-briteRepo/                # Automation script assets.
-    bin/                # Scripts (e.g., gendocs, mkbranch).
-    helpers/            # Helper scripts for bin/briteRepo/`*.
-    tests/              # Test scripts for testing bin/briteRepo.
 src/                    # API `.c` sources.
-    runnerapi.c         # Definition of Runner API.
-    testapi.c           # Definition of Test API.
 tests/                  # Testing assets.
-    golden/             # Golden/baseline files for comparison.
-    include/            # Test `.h` headers.
-    input/              # Test input files.
-    output/             # Captured test outputs to compare against golden/.
-    src/                # Test `.c` source files.
-    tmp/                # Temporary test outputs.
+    golden/               # Golden/baseline files for comparison.
+    include/              # Test `.h` headers.
+    input/                # Test input files.
+    output/               # Captured test outputs to compare against golden/.
+    src/                  # Test `.c` source files.
+    tmp/                  # Temporary test outputs.
 ```
 </details>

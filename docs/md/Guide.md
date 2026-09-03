@@ -1,12 +1,12 @@
 ![Guide](/docs/branding/Guide.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/paulsinclair51/briteTest?display_name=tag)](https://github.com/paulsinclair51/briteTest/releases)
-[![CI](https://github.com/paulsinclair51/briteTest/actions/workflows/ci.yml/badge.svg)](https://github.com/paulsinclair51/briteTest/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/paulsinclair51/briteRepo?display_name=tag)](https://github.com/paulsinclair51/briteRepo/releases)
+[![CI](https://github.com/paulsinclair51/briteRepo/actions/workflows/ci.yml/badge.svg)](https://github.com/paulsinclair51/briteRepo/actions/workflows/ci.yml)
 
 #### Version: v1.0.0
 
-briteTest is a lightweight, easy-to-use C/C++ framework for running unit and
+briteRepo is a lightweight, easy-to-use C/C++ framework for running unit and
 command-line tests focused on clarity and reliability. It provides a simple
 macro-based Runner API with customization macros and functions, a function-based Test API, fault-tolerant execution, clear reporting, comprehensive documentation,
 and no external dependencies.
@@ -45,10 +45,10 @@ SOFTWARE.
 ## Preface
 
 This document is intended for user and contributors who need guidance on using
-briteTest including concepts and a quick start example. This also serves as the
-`<repo>/README.md` for briteTest.
+briteRepo including concepts and a quick start example. This also serves as the
+`<repo>/README.md` for briteRepo.
 
-briteTest provides a Runner API and a Test API, each implemented with a single
+briteRepo provides a Runner API and a Test API, each implemented with a single
 `.h` / `.c` pair with no external dependencies and requiring only a POSIX.1-2001
 environment and a C99-compliant compiler.
 
@@ -268,7 +268,7 @@ source file, or integrating via your build system.
 
 ## 2. Contributing
 
-briteTest welcomes feedback and contributions from the community. This section
+briteRepo welcomes feedback and contributions from the community. This section
 explains how to engage with the project based on your interest level.
 
 <details>
@@ -276,11 +276,11 @@ explains how to engage with the project based on your interest level.
 
 ### 2.1. For Public Users
 
-If you use briteTest and want to provide feedback, ask questions, or suggest features:
+If you use briteRepo and want to provide feedback, ask questions, or suggest features:
 
 **Use [GitHub Discussions](../../discussions)**
 
-- **Ask questions** about using briteTest
+- **Ask questions** about using briteRepo
 - **Suggest features** and improvements
 - **Report bugs** and share workarounds
 - **Share examples** and best practices
