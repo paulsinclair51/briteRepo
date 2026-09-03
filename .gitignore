@@ -54,8 +54,17 @@ dkms.conf
 # debug information files
 *.dwo
 
-# briteRepo test and report output
-/briteRepo/tests/tmp/*
-!/briteRepo/tests/tmp/README.md
-/reports/*
-!/reports/README.md
+# Python virtual environments
+.venv/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# tests/
+tests/tmp/*
+!tests/tmp/README.md
+
+# Generated reports
+reports/*
+!reports/README.md
