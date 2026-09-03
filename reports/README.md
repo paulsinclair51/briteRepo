@@ -25,7 +25,7 @@ See `<repo>/README.md` for an introduction to the repository.
 **mkrepo-d-\<datetime>.md**: Latest untracked dry-run report from
 `<repo>/briteRepo/bin/mkrepo`.
 
-**mkrepo-e-\<datetime>.md**: Latest untracked error-run report from
+**mkrepo-e-\<datetime>.md**: Latest untracked error report from
 `<repo>/briteRepo/bin/mkrepo`.
 
 **rebrand-\<datetime>.md**: Latest untracked brand update report.
@@ -54,7 +54,7 @@ where `n` identifies its position in the current consecutive undo sequence.
 
 **undo-\<type>-d-\<datetime>.md**: Latest untracked undo dry-run report.
 
-**undo-\<type>-e-\<datetime>.md**: Latest undo error-run report.
+**undo-\<type>-e-\<datetime>.md**: Latest untracked undo error-run report.
 
 **README.md**: This directory guide.
 
