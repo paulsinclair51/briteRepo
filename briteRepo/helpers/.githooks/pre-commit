@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+# pre-commit hook - Block direct git add and git commit operations
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see LICENSE in the repository root.
+#
+# This hook runs before 'git add' and 'git commit' commands.
+# It prevents developers from bypassing the script-based workflow.
+#
+# Scripts set GIT_BYPASS_HOOKS=true when performing authorized commits.
+#
+# Blocked operations:
+#   git add <file>          → Use: commit -m "msg"
+#   git commit -m "msg"     → Use: commit -m "msg"
+#   git rm <file>           → Use: commit -m "msg"
+
+set -euo pipefail
+
+# Source hook helper for common functions
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GITHOOK_HELPER="$HOOK_DIR/githook_helper.sh"
+
+if [[ -f "$GITHOOK_HELPER" ]]; then
+  # shellcheck disable=SC1090  # Hook path is resolved at runtime.
+  source "$GITHOOK_HELPER" 2>/dev/null || true
+fi
+
+if ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+  echo "Error: Commits are not allowed while HEAD is detached (read-only checkout)." >&2
+  echo "Use 'chbranch' to switch to a valid local targeted or contributor branch." >&2
+  exit 1
+fi
+
+# Check if bypass is set by authorized script or owner unrestricted mode
+if declare -F check_bypass >/dev/null 2>&1; then
+  if check_bypass "git add/commit/rm" "commit"; then
+    exit 0
+  fi
+elif [[ "${GIT_BYPASS_HOOKS:-false}" == "true" ]]; then
+  exit 0
+fi
+exit 1

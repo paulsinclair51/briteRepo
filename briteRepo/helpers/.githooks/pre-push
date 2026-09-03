@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+# pre-push hook - Block direct git push operations
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see LICENSE in the repository root.
+#
+# This hook runs before 'git push' command.
+# It prevents developers from bypassing the script-based workflow.
+#
+# Scripts set GIT_BYPASS_HOOKS=true when performing authorized pushes.
+#
+# Blocked operations:
+#   git push origin branch           → Use: commit -m "msg" -p
+#   git push --force-with-lease     → Use: merge -f (for rebase)
+#   git push origin --delete branch → Use: rmbranch <branch> -r
+
+set -euo pipefail
+
+# Source hook helper for common functions
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GITHOOK_HELPER="$HOOK_DIR/githook_helper.sh"
+
+if [[ -f "$GITHOOK_HELPER" ]]; then
+  # shellcheck disable=SC1090  # Hook path is resolved at runtime.
+  source "$GITHOOK_HELPER" 2>/dev/null || true
+fi
+
+# Check if bypass is set by authorized script or owner unrestricted mode
+if declare -F check_bypass >/dev/null 2>&1; then
+  if check_bypass "git push"; then
+    exit 0
+  fi
+elif [[ "${GIT_BYPASS_HOOKS:-false}" == "true" ]]; then
+  exit 0
+fi
+exit 1

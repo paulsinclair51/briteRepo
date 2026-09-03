@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# briteRepo test and report output
+/briteRepo/tests/tmp/*
+!/briteRepo/tests/tmp/README.md
+/reports/*
+!/reports/README.md

@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+
+# test_pulldown.sh - smoke tests for briteRepo/bin/pulldown
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see LICENSE in the repository root.
+
+set -euo pipefail
+export LC_ALL=C
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common_test_helpers.sh
+source "$SCRIPT_DIR/common_test_helpers.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PULLDOWN_SRC="$REPO_ROOT/briteRepo/bin/pulldown"
+PULLDOWN_WORKFLOW_SRC="$REPO_ROOT/briteRepo/helpers/pulldown_workflow.sh"
+COMMON_HELPER_SRC="$REPO_ROOT/briteRepo/helpers/common.sh"
+GIT_HELPER_SRC="$REPO_ROOT/briteRepo/helpers/git_helpers.sh"
+HISTORY_HELPER_SRC="$REPO_ROOT/briteRepo/helpers/history_log.sh"
+REPORT_HELPER_SRC="$REPO_ROOT/briteRepo/helpers/report_helpers.sh"
+REPORT_SYNC_HELPER_SRC="$REPO_ROOT/briteRepo/helpers/report_sync.sh"
+
+latest_report() {
+  local repo_root="$1"
+  find "$repo_root/reports" -maxdepth 1 -type f -name 'pulldown-*.md' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-
+}
+
+report_path_from_output() {
+  local out_file="$1"
+  local rel
+
+  rel="$(grep -Eo 'reports/pulldown-[0-9]{8}-[0-9]{6}[+-][0-9]{4}(-[0-9]+)?\.md' "$out_file" | tail -n 1 || true)"
+  [[ -n "$rel" ]] || return 1
+  printf '%s\n' "$rel"
+}
+
+for dep in bash find git grep mktemp; do
+  command -v "$dep" >/dev/null 2>&1 || fail "missing required command: $dep"
+done
+
+[[ -f "$PULLDOWN_SRC" ]] || fail "missing script: $PULLDOWN_SRC"
+[[ -f "$PULLDOWN_WORKFLOW_SRC" ]] || \
+  fail "missing helper: $PULLDOWN_WORKFLOW_SRC"
+[[ -f "$COMMON_HELPER_SRC" ]] || fail "missing helper: $COMMON_HELPER_SRC"
+[[ -f "$GIT_HELPER_SRC" ]] || fail "missing helper: $GIT_HELPER_SRC"
+[[ -f "$HISTORY_HELPER_SRC" ]] || fail "missing helper: $HISTORY_HELPER_SRC"
+[[ -f "$REPORT_HELPER_SRC" ]] || fail "missing helper: $REPORT_HELPER_SRC"
+[[ -f "$REPORT_SYNC_HELPER_SRC" ]] || fail "missing helper: $REPORT_SYNC_HELPER_SRC"
+
+TMPDIR="$(mktemp -d)"
+cleanup() {
+  if [[ "${KEEP_TMPDIR:-0}" == "1" ]]; then
+    echo "KEEP_TMPDIR=1 preserving test artifacts at: $TMPDIR" >&2
+    return 0
+  fi
+  chmod -R u+w "$TMPDIR" 2>/dev/null || true
+  rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
+ORIGIN="$TMPDIR/origin.git"
+WORK="$TMPDIR/work"
+PEER="$TMPDIR/peer"
+
+git init --bare "$ORIGIN" >/dev/null 2>&1
+mkdir -p "$ORIGIN/reports"
+
+git clone "file://$ORIGIN" "$WORK" >/dev/null 2>&1
+git clone "file://$ORIGIN" "$PEER" >/dev/null 2>&1
+
+mkdir -p "$WORK/briteRepo/bin" "$WORK/briteRepo/helpers" "$WORK/reports"
+cp "$PULLDOWN_SRC" "$WORK/briteRepo/bin/pulldown"
+cp "$PULLDOWN_WORKFLOW_SRC" "$WORK/briteRepo/helpers/pulldown_workflow.sh"
+cp "$COMMON_HELPER_SRC" "$WORK/briteRepo/helpers/common.sh"
+cp "$GIT_HELPER_SRC" "$WORK/briteRepo/helpers/git_helpers.sh"
+cp "$HISTORY_HELPER_SRC" "$WORK/briteRepo/helpers/history_log.sh"
+cp "$REPORT_HELPER_SRC" "$WORK/briteRepo/helpers/report_helpers.sh"
+cp "$REPORT_SYNC_HELPER_SRC" "$WORK/briteRepo/helpers/report_sync.sh"
+chmod +x "$WORK/briteRepo/bin/pulldown"
+
+# pushup drives the merge-down library directly; emulate that entry point.
+PUSHUP_SYNC_RUNNER="$TMPDIR/pushup_sync_runner.sh"
+cat > "$PUSHUP_SYNC_RUNNER" <<'EOF'
+set -euo pipefail
+source ./briteRepo/helpers/pulldown_workflow.sh
+bt_pulldown_init
+PUSHUP_SYNC=true
+ORIGINAL_ARGS=()
+bt_pulldown_run
+EOF
+
+(
+  cd "$WORK"
+  git config user.name "testuser"
+  git config user.email "test@example.com"
+
+  echo "seed" > README.md
+  cat > .gitignore <<'GITIGNORE'
+reports/branch-*.md
+reports/commit-*.md
+reports/pulldown-*.md
+reports/mrgbranch-*.md
+GITIGNORE
+  git add README.md briteRepo reports .gitignore
+  git commit -m "seed repo" >/dev/null 2>&1
+  git branch -M main
+  git push -u origin main >/dev/null 2>&1
+
+  git checkout -b v1.0.0 >/dev/null 2>&1
+  git commit --allow-empty -m "create version branch" >/dev/null 2>&1
+  git push -u origin v1.0.0 >/dev/null 2>&1
+
+  git checkout -b dev/current-v1.0.0 >/dev/null 2>&1
+  git commit --allow-empty -m "create dev branch" >/dev/null 2>&1
+  git push -u origin dev/current-v1.0.0 >/dev/null 2>&1
+)
+
+(
+  cd "$PEER"
+  git config user.name "peeruser"
+  git config user.email "peer@example.com"
+  git fetch origin >/dev/null 2>&1
+  git checkout v1.0.0 >/dev/null 2>&1
+)
+
+# 1) Help output
+rc=$(run_capture "$TMPDIR/help.out" bash -lc "cd '$WORK' && bash ./briteRepo/bin/pulldown -h")
+[[ "$rc" -eq 0 ]] || fail "pulldown -h should exit 0"
+assert_contains "Usage:" "$TMPDIR/help.out"
+pass "help output"
+
+rc=$(run_capture "$TMPDIR/help-overrides.out" bash -lc \
+  "cd '$WORK' && bash ./briteRepo/bin/pulldown unexpected --help")
+[[ "$rc" -eq 0 ]] || fail "pulldown --help should override arguments"
+assert_contains "Usage:" "$TMPDIR/help-overrides.out"
+pass "help overrides arguments"
+
+for internal_option in --pushup --force --verbose -f; do
+  rc=$(run_capture "$TMPDIR/internal-option-${internal_option#-}.out" \
+    bash -lc "cd '$WORK' && bash ./briteRepo/bin/pulldown '$internal_option'")
+  [[ "$rc" -eq 1 ]] || \
+    fail "public pulldown should reject $internal_option (got $rc)"
+  assert_contains "Unknown option: $internal_option" \
+    "$TMPDIR/internal-option-${internal_option#-}.out"
+done
+pass "internal options rejected by public command"
+
+copyfix_state_root="$(git -C "$WORK" rev-parse \
+  --path-format=absolute --git-common-dir)/briteRepo-copyfix-state"
+mkdir -p "$copyfix_state_root/dev/current-v1.0.0"
+rc=$(run_capture "$TMPDIR/copyfix-active.out" \
+  bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown")
+[[ "$rc" -eq 3 ]] || fail "unfinished copyfix should block pulldown (got $rc)"
+assert_contains "has an unfinished copyfix operation" \
+  "$TMPDIR/copyfix-active.out"
+rm -rf "$copyfix_state_root"
+pass "unfinished copyfix blocks pulldown"
+
+# 2) Skip mode should emit an error report and summary line.
+rc=$(run_capture "$TMPDIR/skip-e.out" bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -e")
+[[ "$rc" -eq 6 ]] || fail "pulldown error mode should exit 6 (got $rc)"
+assert_contains "Error: Merge down skipped due to -e option." "$TMPDIR/skip-e.out"
+assert_contains "Guidance: Run without -e option." "$TMPDIR/skip-e.out"
+assert_contains "See reports/pulldown-e-" "$TMPDIR/skip-e.out"
+skip_report="$(latest_report "$WORK")"
+[[ -f "$skip_report" ]] || fail "expected pulldown skip report"
+assert_contains "**Error:** Merge down skipped due to -e option." "$skip_report"
+assert_contains "## Guidance" "$skip_report"
+assert_contains "- Run without -e option." "$skip_report"
+pass "skip mode"
+
+# 3) Positional argument should be rejected
+rc=$(run_capture "$TMPDIR/arg-reject.out" bash -lc "cd '$WORK' && bash ./briteRepo/bin/pulldown unexpected")
+[[ "$rc" -eq 1 ]] || fail "positional argument should exit 1 (got $rc)"
+assert_contains "Unknown argument: unexpected" "$TMPDIR/arg-reject.out"
+pass "positional argument rejected"
+
+# Internal pushup synchronization can merge a saved local-only parent without
+# contacting the configured remote.
+(
+  cd "$WORK"
+  git checkout dev/current-v1.0.0 >/dev/null 2>&1
+  git checkout -b local-parent >/dev/null 2>&1
+  git checkout -b local-child >/dev/null 2>&1
+  echo "local child" > local-child.txt
+  git add local-child.txt
+  git commit -m "local child work" >/dev/null 2>&1
+  git checkout local-parent >/dev/null 2>&1
+  echo "local parent" > local-parent.txt
+  git add local-parent.txt
+  git commit -m "local parent update" >/dev/null 2>&1
+  git checkout local-child >/dev/null 2>&1
+
+  state_file="$(git rev-parse --git-path briteRepo/pushup.state)"
+  mkdir -p "$(dirname "$state_file")"
+  git config --file "$state_file" pushup.version 2
+  git config --file "$state_file" pushup.source local-child
+  git config --file "$state_file" pushup.parent local-parent
+  git config --file "$state_file" pushup.phase source-selected
+  git config --file "$state_file" pushup.command-line "pushup -t 10 -o"
+  git config --file "$state_file" pushup.owner-override true
+  git config --file "$state_file" pushup.source-has-remote false
+  git config --file "$state_file" pushup.parent-has-remote false
+  git notes --ref=briteRepo-workflow append -m \
+    $'--- briteRepo workflow ---\nWorkflow-Type: pushup\nWorkflow-Time: 2026-09-01 00:00:00+00:00\nWorkflow-Branch: local-parent\nWorkflow-User: testuser <test@example.com>\nCommand-Line: pushup -o\nCommand-Source: user\nSummary: local pushup\nAuthority: owner\nSource-Branch: local-child\nTarget-Branch: local-parent\nPR: 42\nCI-CD: ci build SUCCESS' \
+    local-parent
+  git remote set-url origin "$TMPDIR/unreachable-origin.git"
+)
+rc=$(run_capture "$TMPDIR/local-parent-sync.out" bash -lc \
+  "cd '$WORK' && bash '$PUSHUP_SYNC_RUNNER'")
+[[ "$rc" -eq 0 ]] || \
+  fail "local pushup synchronization should exit 0 (got $rc)"
+[[ -f "$WORK/local-parent.txt" && -f "$WORK/local-child.txt" ]] || \
+  fail "local pushup synchronization should combine source and parent files"
+local_sync_body="$(git -C "$WORK" log -1 --format=%B)"
+[[ "$local_sync_body" == *"Command-Line: pushup -t 10 -o"* ]] || \
+  fail "internal synchronization should record its initiating pushup command"
+[[ "$local_sync_body" == *"Workflow-Type: pulldown"* ]] || \
+  fail "internal synchronization should record the pulldown operation type"
+[[ "$local_sync_body" == *"Authority: owner"* ]] || \
+  fail "internal synchronization should copy owner authority"
+[[ "$local_sync_body" == *"PR: 42"* ]] || \
+  fail "internal synchronization should copy pushup PR context"
+[[ "$local_sync_body" == *"CI-CD: ci build SUCCESS"* ]] || \
+  fail "internal synchronization should copy pushup CI/CD context"
+git -C "$WORK" remote set-url origin "file://$ORIGIN"
+rm -f "$WORK/.git/briteRepo/pushup.state"
+git -C "$WORK" checkout dev/current-v1.0.0 >/dev/null 2>&1
+pass "local-only pushup source synchronization"
+
+# Nothing to merge down should not create a report.
+cat > "$WORK/reports/pulldown-d-20000101-000000+0000.md" <<'EOF'
+# Stale Merge-Down Report
+
+**Branch:** `dev/current-v1.0.0`
+EOF
+cat > "$WORK/reports/pulldown-e-20000101-000001+0000.md" <<'EOF'
+# Stale Merge-Down Error Report
+
+**Branch:** `dev/current-v1.0.0`
+EOF
+chmod a-w "$WORK/reports/pulldown-d-20000101-000000+0000.md" \
+  "$WORK/reports/pulldown-e-20000101-000001+0000.md"
+rc=$(run_capture "$TMPDIR/noop.out" \
+  bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown")
+[[ "$rc" -eq 5 ]] || fail "no-work pulldown should exit 5 (got $rc)"
+assert_contains "no changes to merge" "$TMPDIR/noop.out"
+[[ -f "$WORK/reports/pulldown-d-20000101-000000+0000.md" ]] || \
+  fail "pulldown prerequisite failure should preserve stale dry-run report"
+[[ -f "$WORK/reports/pulldown-e-20000101-000001+0000.md" ]] || \
+  fail "pulldown prerequisite failure should preserve stale error report"
+pass "no-work pulldown prerequisite"
+
+# 3) Dry-run output stays compact and reports the merge preview
+(
+  cd "$PEER"
+  git checkout v1.0.0 >/dev/null 2>&1
+  git pull --ff-only origin v1.0.0 >/dev/null 2>&1
+  echo "parent change dry" > parent-change-dry.txt
+  git add parent-change-dry.txt
+  git commit -m "parent change dry" >/dev/null 2>&1
+  git push origin v1.0.0 >/dev/null 2>&1
+)
+rc=$(run_capture "$TMPDIR/dryrun.out" bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -d")
+[[ "$rc" -eq 0 ]] || fail "dry-run pulldown should exit 0 (got $rc)"
+assert_contains "Dry-run: merge v1.0.0 -> dev/current-v1.0.0" "$TMPDIR/dryrun.out"
+assert_contains "See reports/pulldown-d-" "$TMPDIR/dryrun.out"
+pass "dry-run output stays compact"
+
+# 4) Protected branch is blocked
+rc=$(run_capture "$TMPDIR/protected.out" bash -lc "cd '$WORK' && git checkout main >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown")
+[[ "$rc" -eq 4 ]] || fail "protected branch should exit 4 (got $rc)"
+assert_contains "Error: Cannot sync up on protected branch 'main'" "$TMPDIR/protected.out"
+assert_contains "Guidance: use pushup to merge changes to this branch." "$TMPDIR/protected.out"
+pass "protected branch gate"
+
+# pushup alone may merge a published parent into its protected source branch.
+rc=$(run_capture "$TMPDIR/protected-pushup.out" bash -lc "cd '$WORK' && git checkout v1.0.0 >/dev/null 2>&1 && bash '$PUSHUP_SYNC_RUNNER'")
+[[ "$rc" -eq 4 ]] || fail "unvalidated pushup mode should remain blocked (got $rc)"
+(
+  cd "$PEER"
+  git checkout main >/dev/null 2>&1
+  echo "parent change for protected source" > parent-protected-source.txt
+  git add parent-protected-source.txt
+  git commit -m "parent change for protected source" >/dev/null 2>&1
+  git push origin main >/dev/null 2>&1
+)
+(
+  cd "$WORK"
+  git checkout v1.0.0 >/dev/null 2>&1
+  mkdir -p .git/briteRepo
+  git config --file .git/briteRepo/pushup.state pushup.version 2
+  git config --file .git/briteRepo/pushup.state pushup.source v1.0.0
+  git config --file .git/briteRepo/pushup.state pushup.parent main
+  git config --file .git/briteRepo/pushup.state pushup.phase source-selected
+  git config --file .git/briteRepo/pushup.state pushup.source-has-remote true
+  git config --file .git/briteRepo/pushup.state pushup.parent-has-remote true
+)
+rc=$(run_capture "$TMPDIR/protected-pushup-sync.out" bash -lc "cd '$WORK' && bash '$PUSHUP_SYNC_RUNNER'")
+[[ "$rc" -eq 0 ]] || fail "validated pushup source sync should succeed (got $rc)"
+rm -f "$WORK/.git/briteRepo/pushup.state"
+pass "pushup can synchronize protected source branch"
+
+# 5) Force merge records report history without creating an immediate report
+remote_report_count_before="$(find "$ORIGIN/reports" -maxdepth 1 -type f -name 'commit-*.md' | wc -l | tr -d ' ')"
+(
+  cd "$PEER"
+  git checkout v1.0.0 >/dev/null 2>&1
+  git pull --ff-only origin v1.0.0 >/dev/null 2>&1
+  echo "parent change 1" > parent-change-1.txt
+  git add parent-change-1.txt
+  git commit -m "parent change one" >/dev/null 2>&1
+  git push origin v1.0.0 >/dev/null 2>&1
+)
+
+reports_before="$(find "$WORK/reports" -maxdepth 1 -type f \
+  -name 'pulldown-[0-9]*.md' -print | sort)"
+rc=$(run_capture "$TMPDIR/merge-push.out" bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -c 'sync parent one'")
+[[ "$rc" -eq 0 ]] || fail "forced merge/push should exit 0 (got $rc)"
+assert_contains "Merged parent 'v1.0.0' into 'dev/current-v1.0.0'" \
+  "$TMPDIR/merge-push.out"
+assert_contains "Run report for details." "$TMPDIR/merge-push.out"
+if grep -Eq 'Create merge commit|Merge successful|Merge down complete' \
+  "$TMPDIR/merge-push.out"; then
+  fail "normal pulldown output should be concise and non-interactive"
+fi
+reports_after="$(find "$WORK/reports" -maxdepth 1 -type f \
+  -name 'pulldown-[0-9]*.md' -print | sort)"
+[[ "$reports_after" == "$reports_before" ]] || \
+  fail "successful merge-down should not add an immediate report"
+merge_body="$(git -C "$WORK" log -1 --format=%B dev/current-v1.0.0)"
+[[ "$merge_body" == *'Command-Line: pulldown -c sync\ parent\ one'* ]] || \
+  fail "merge-down commit should record its command line"
+[[ "$merge_body" == *"Source-Branch: v1.0.0"* ]] || \
+  fail "merge-down commit should record its source branch"
+[[ "$merge_body" == *"Target-Branch: dev/current-v1.0.0"* ]] || \
+  fail "merge-down commit should record its target branch"
+if ! grep -Eq '^Parent-Commits-Integrated: [1-9][0-9]*$' <<< "$merge_body"; then
+  fail "merge-down commit should record a positive integrated commit count"
+fi
+for count_field in Files-Modified Files-Added Files-Deleted; do
+  if ! grep -Eq "^${count_field}: [0-9]+$" <<< "$merge_body"; then
+    fail "merge-down commit should record numeric $count_field"
+  fi
+done
+if grep -Eq '^Files-(Modified|Added|Deleted): [1-9][0-9]*$' \
+  <<< "$merge_body"; then
+  :
+else
+  fail "merge-down commit should record at least one changed file"
+fi
+[[ "$merge_body" == *"Status: Parent branch merged into current branch"* ]] || \
+  fail "merge-down commit should record merge status"
+[[ "$merge_body" == *"Method: Merge commit (--no-ff) created by pulldown"* ]] || \
+  fail "merge-down commit should record merge method"
+
+remote_report_count="$(find "$ORIGIN/reports" -maxdepth 1 -type f -name 'commit-*.md' | wc -l | tr -d ' ')"
+[[ "$remote_report_count" -eq "$remote_report_count_before" ]] || fail "expected no remote report copy"
+pass "force merge records report history"
+
+# 6) A second merge also defers reporting.
+(
+  cd "$PEER"
+  git checkout v1.0.0 >/dev/null 2>&1
+  git pull --ff-only origin v1.0.0 >/dev/null 2>&1
+  echo "parent change 2" > parent-change-2.txt
+  git add parent-change-2.txt
+  git commit -m "parent change two" >/dev/null 2>&1
+  git push origin v1.0.0 >/dev/null 2>&1
+)
+
+reports_before="$(find "$WORK/reports" -maxdepth 1 -type f \
+  -name 'pulldown-[0-9]*.md' -print | sort)"
+rc=$(run_capture "$TMPDIR/merge-skip-push.out" bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -c 'sync parent two'")
+[[ "$rc" -eq 0 ]] || fail "merge with push skipped should exit 0 (got $rc)"
+assert_contains "Merged parent 'v1.0.0' into 'dev/current-v1.0.0'" \
+  "$TMPDIR/merge-skip-push.out"
+assert_contains "Run report for details." "$TMPDIR/merge-skip-push.out"
+reports_after="$(find "$WORK/reports" -maxdepth 1 -type f \
+  -name 'pulldown-[0-9]*.md' -print | sort)"
+[[ "$reports_after" == "$reports_before" ]] || \
+  fail "second merge-down should not add an immediate report"
+pass "merge reporting is deferred"
+
+# 7) Content-equivalent parent history is synchronized without exposing commit
+# counts as user work.
+(
+  cd "$PEER"
+  git checkout v1.0.0 >/dev/null 2>&1
+  git pull --ff-only origin v1.0.0 >/dev/null 2>&1
+  git commit --allow-empty -m "content-neutral parent commit" >/dev/null 2>&1
+  git push origin v1.0.0 >/dev/null 2>&1
+)
+content_neutral_before="$(git -C "$WORK" rev-parse dev/current-v1.0.0)"
+content_neutral_parent="$(git -C "$WORK" rev-parse origin/v1.0.0)"
+rc=$(run_capture "$TMPDIR/content-neutral-dry.out" bash -lc \
+  "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -d -c 'preview content-neutral parent'")
+[[ "$rc" -eq 0 ]] || \
+  fail "content-neutral pulldown dry-run should exit 0 (got $rc)"
+assert_contains "Dry-run: merge v1.0.0 -> dev/current-v1.0.0" \
+  "$TMPDIR/content-neutral-dry.out"
+content_neutral_dry_report="$(find "$WORK/reports" -maxdepth 1 -type f \
+  -name 'pulldown-d-*.md' -print -quit)"
+[[ -f "$content_neutral_dry_report" ]] || \
+  fail "content-neutral dry-run should write a report"
+rc=$(run_capture "$TMPDIR/content-neutral.out" bash -lc \
+  "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -c 'sync content-neutral parent'")
+[[ "$rc" -eq 0 ]] || fail "content-neutral pulldown should exit 0 (got $rc)"
+content_neutral_tip_short="$(git -C "$WORK" rev-parse --short=7 dev/current-v1.0.0)"
+assert_contains \
+  "Synchronized (${content_neutral_tip_short}) parent 'v1.0.0' with 'dev/current-v1.0.0': no file or directory changes." \
+  "$TMPDIR/content-neutral.out"
+[[ "$(git -C "$WORK" rev-parse dev/current-v1.0.0)" != \
+  "$content_neutral_before" ]] || \
+  fail "content-neutral pulldown should record ancestry synchronization"
+git -C "$WORK" merge-base --is-ancestor "$content_neutral_parent" \
+  dev/current-v1.0.0 || \
+  fail "content-neutral pulldown should incorporate the parent tip"
+pass "content-neutral ancestry synchronization"
+
+# 8) Whitespace-only comments should be rejected.
+rc=$(run_capture "$TMPDIR/empty-comment.out" bash -lc "cd '$WORK' && git checkout dev/current-v1.0.0 >/dev/null 2>&1 && bash ./briteRepo/bin/pulldown -c '   '")
+[[ "$rc" -eq 1 ]] || fail "whitespace-only comment should exit 1 (got $rc)"
+assert_contains "Commit comment must include at least one non-whitespace character" "$TMPDIR/empty-comment.out"
+pass "whitespace-only merge comments are rejected"
+
+echo "All pulldown smoke tests passed."

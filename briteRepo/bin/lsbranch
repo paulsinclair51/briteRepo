@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+
+# lsbranch - list branches and their status.
+#
+# See usage below for details, or run: lsbranch -h
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see '<repo>/LICENSE'.
+
+usage() {
+  cat <<'EOF'
+Usage:
+  lsbranch [-t SEC] [-v]
+  lsbranch BRANCH [-t SEC] [-v]
+  lsbranch {-a | PATTERN} [-i] [-l] [-r] [-t SEC] [-v] [-x "PATTERN"]
+  lsbranch {-h | --help}
+
+For the first usage, list the local and remote status of the current
+branch and its parent branch.
+
+Use BRANCH to list the local and remote status of the branch with the
+name BRANCH and its parent branch.
+
+Use -a or PATTERN to list the status of branches matching "*"
+or PATTERN, respectively.
+
+Arguments:
+  BRANCH      Status for branch with name BRANCH (not quoted) and its
+              parent branch.
+  PATTERN     Filter branches by quoted (") glob pattern on
+              branch name. Supports *, ?, [abc], etc.
+              Examples: "*bug*", "fix*",  "*issue*".
+
+Options (see above for the options allowed for each form of usage):
+
+  -a          Same as specifying "*" as PATTERN.
+  -h, --help  Output this help to stdout and exit (other options and
+              arguments are ignored).
+  -i          List only branches that violate naming rules (see
+              Contributor Guide for rules). Requires -a or PATTERN.
+  -l          List local branches.
+  -r          List remote branches.
+  -t SEC      Remote operation timeout in seconds (default: 10).
+              SEC must be an integer greater than 0.
+  -v          Output progress and diagnostics to stdout.
+  -x PATTERN  Exclude branches matching the given quoted (") glob
+              pattern, even if they match the include PATTERN.
+
+  If neither -l nor -r is specified, same as specifying
+  both -l and -r (i.e., both local and remote branches are listed).
+
+  -a and include PATTERN are mutually exclusive. Use -a to include all
+  branches.
+
+Filtering:
+  -a          Includes all branches (local and remote).
+  PATTERN     Includes matching branches.
+  -x PATTERN  Excludes matching branches, even when they match the include
+              PATTERN.
+  -i          Keeps only invalid branches after PATTERN and -x filtering.
+  -l, -r      Select local and/or remote branches after filtering.
+
+Examples:
+  # Check current branch
+  lsbranch
+
+  # Check all branches (local and remote)
+  lsbranch -a
+  lsbranch -a -l -r
+  lsbranch "*"
+  lsbranch "*" -l -r
+
+  # Check local branches
+  lsbranch -a -l
+  lsbranch "*" -l
+
+  # Check remote branches
+  lsbranch -a -r
+  lsbranch "*" -r
+
+  # Check development branches (both local and remote)
+  lsbranch "dev/*"
+
+  # Check branches matching pattern (both local and remote)
+  lsbranch "*auth*"
+
+  # Verbose output for current branch
+  lsbranch -v
+
+Outputs:
+  - Writes help (usage) text or status messages for the
+    selected branches to stdout.
+  - Writes warnings and diagnostics to stdout; writes errors to stderr.
+
+Branch markers:
+  !                             Branch name violates repository naming rules.
+
+Status tags:
+  [local]                       Local branch; a remote branch also exists or
+                                current remote status is unavailable.
+  [remote copy]                 Current branch is a read-only copy of a remote
+                                branch.
+  [local only]                  Local branch with no remote branch.
+  [remote]                      Remote branch; a local branch also exists.
+  [remote only]                 Remote branch with no local branch.
+  [current]                     This is the currently selected branch.
+  [uncommitted]                 There are changes that have not been committed.
+  [read-only]                   The branch must not be modified.
+  [invalid name]                Branch name violates repository naming rules.
+  [offline]                     Current remote status could not be retrieved;
+                                cached remote information is displayed when
+                                available.
+  [status unavailable]          Branch relation could not be calculated.
+  [remote behind by N]          For a local branch, local has N file or
+                                directory changes not on the remote.
+  [local behind by N]           For a remote branch, remote has N file or
+                                directory changes not on the local branch.
+  [remote ahead by N]           For a local branch, remote has N file or
+                                directory changes not on the local.
+  [local ahead by N]            For a remote branch, local has N file or
+                                directory changes not on the remote branch.
+  [remote differs by N]         For a local branch, local and remote differ by
+                                N file or directory changes.
+  [local differs by N]          For a remote branch, remote and local differ
+                                by N file or directory changes.
+  [no parent]                   Branch main does not have a parent branch.
+  [no parent!]                  A branch (other than main) does not have a parent.
+                                A branch (other than main) should have a parent
+                                if normal workflow is followed.
+  [parent NAME]                 NAME is the branch's parent and content matches.
+  [parent unavailable NAME]     NAME is the branch's parent, but that branch is
+                                unavailable locally and among downloaded remote
+                                branches; it may be unfetched or deleted.
+  [parent NAME behind by N]     Branch has N file or directory changes not on
+                                its parent.
+  [parent NAME ahead by N]      Parent has N file or directory changes not on
+                                the branch.
+  [parent NAME differs by N]    Branch and parent content differs by N file or
+                                directory changes.
+  [copyfix in progress]         Rerun copyfix to resume.
+  [pushup in progress]          Rerun pushup to resume.
+  [pull in progress]            Resolve conflicts, then rerun pull.
+  [retarget in progress]        Resolve conflicts, then rerun retarget -r.
+  [pulldown in progress]        Resolve conflicts, then rerun pulldown.
+  [PRs: N]                      N open pull requests exist for the branch.
+
+Exit codes:
+  0   Success.
+  1   Argument or validation error.
+  2   Requested branch or pattern was not found.
+  4   Branches found that violate naming rules if option -i
+      specified.
+  8   Running outside a Git repository.
+  200 Git operation failed.
+EOF
+}
+
+readonly EXIT_INVALID_ARGUMENT=1
+readonly EXIT_NOT_FOUND=2
+readonly EXIT_OPERATION_FAILED=200
+readonly EXIT_CONFIG_ERROR=4
+readonly EXIT_RUNTIME_ERROR=200
+readonly EXIT_NOT_GIT_REPO=8
+
+usage_error() {
+  local message="$1"
+  usage
+  echo >&2
+  echo "$message. See usage above for details." >&2
+  exit "$EXIT_INVALID_ARGUMENT"
+}
+
+ensure_git_repository() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    bt_error_exit "$EXIT_NOT_GIT_REPO" \
+      "This command must be run from inside a git repository."
+  fi
+}
+
+# High-Level Flow:
+# 1. Validate arguments and parse options (-a, -l, -r, -v, -i, -x).
+# 2. Resolve query scope: current branch, exact branch, or glob pattern.
+# 3. Capture initial repository state.
+# 4. Ensure remote refs are up-to-date (with timeout and fallback).
+# 5. For each candidate branch:
+#    - Collect status, sync metrics, PR count with per-field error fallbacks.
+#    - Print compact status to stdout.
+# 6. Log warnings for degraded data collection; exit with appropriate code.
+
+# shellcheck disable=SC1091,SC2317  # Helper source paths and trap-managed
+# paths.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# Shared helpers
+# shellcheck source=helpers/common.sh
+source "$SCRIPT_DIR/../helpers/common.sh"
+# shellcheck source=helpers/git_helpers.sh
+source "$SCRIPT_DIR/../helpers/git_helpers.sh"
+# shellcheck source=helpers/github_helpers.sh
+source "$SCRIPT_DIR/../helpers/github_helpers.sh"
+# shellcheck source=helpers/history_log.sh
+source "$SCRIPT_DIR/../helpers/history_log.sh"
+# shellcheck source=helpers/report_helpers.sh
+source "$SCRIPT_DIR/../helpers/report_helpers.sh"
+
+RUN_TS_FILE="$(date '+%Y%m%d-%H%M%S%z')"
+RUN_TS_DISPLAY="$(date '+%Y-%m-%d %H:%M:%S%z' | sed -E 's/([+-][0-9]{2})([0-9]{2})$/\1:\2/')"
+ORIGINAL_ARGS=("$@")
+
+# shellcheck source=helpers/branch_status.sh
+source "$SCRIPT_DIR/../helpers/branch_status.sh"
+
+bt_branch_status_init
+
+# Check for help first — if specified, ignore all other arguments
+for arg in "$@"; do
+  if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+done
+
+# Parse options and arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -a)
+      ALL_BRANCHES=true
+      shift
+      ;;
+    -v)
+      VERBOSE=true
+      shift
+      ;;
+    -i)
+      INVALID_ONLY=true
+      shift
+      ;;
+    -l)
+      INCLUDE_LOCAL_FLAG=true
+      shift
+      ;;
+    -r)
+      INCLUDE_REMOTE_FLAG=true
+      shift
+      ;;
+    -t)
+      [[ $# -ge 2 ]] || usage_error "Option -t requires SEC"
+      bt_is_valid_remote_timeout "$2" || \
+        usage_error "SEC for -t must be an integer greater than 0"
+      REMOTE_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
+    -x)
+      shift
+      if [[ $# -eq 0 ]]; then
+        usage_error "Missing PATTERN for -x"
+      fi
+      EXCLUDE_PATTERN="$1"
+      shift
+      ;;
+    -*)
+      usage_error "Unknown option: $1"
+      ;;
+    *)
+      if [[ -n "$TARGET_BRANCH" || -n "$BRANCH_PATTERN" ]]; then
+        printf 'Error: Unexpected argument: %q\n' "$1" >&2
+        printf 'Multiple positional arguments received — pattern '
+        printf 'was likely expanded by the shell.\n' >&2
+        printf 'Quote the pattern to prevent expansion, '
+        printf 'e.g.: lsbranch "*"\n' >&2
+        exit "$EXIT_INVALID_ARGUMENT"
+      fi
+      if [[ "$1" =~ [\*\?\[] ]]; then
+        BRANCH_PATTERN="$1"
+      else
+        TARGET_BRANCH="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
+
+ensure_git_repository
+
+# If -a specified, set pattern to match all branches
+if $ALL_BRANCHES; then
+  if [[ -n "$TARGET_BRANCH" ]]; then
+    usage_error "Cannot combine BRANCH with -a"
+  fi
+  if [[ -n "$BRANCH_PATTERN" ]]; then
+    usage_error "Cannot combine PATTERN with -a"
+  fi
+  BRANCH_PATTERN="*"
+fi
+
+if [[ -n "$TARGET_BRANCH" &&
+  ( "$INVALID_ONLY" == true || -n "$EXCLUDE_PATTERN" ||
+    "$INCLUDE_LOCAL_FLAG" == true || "$INCLUDE_REMOTE_FLAG" == true ) ]]; then
+  usage_error "When BRANCH is specified, only -v is allowed"
+fi
+
+if [[ -n "$EXCLUDE_PATTERN" && -z "$BRANCH_PATTERN" ]]; then
+  usage_error "Option -x requires -a or PATTERN"
+fi
+
+if [[ "$INVALID_ONLY" == true && -z "$BRANCH_PATTERN" ]]; then
+  usage_error "Option -i requires -a or PATTERN"
+fi
+
+# Determine what to include based on flags
+# If neither flag specified, default to both; if at least one flag
+# specified, use the flags
+if ! $INCLUDE_LOCAL_FLAG && ! $INCLUDE_REMOTE_FLAG; then
+  # Default: include both
+  INCLUDE_LOCAL=true
+  INCLUDE_REMOTE=true
+else
+  # At least one flag specified: use exactly what was specified
+  INCLUDE_LOCAL=$INCLUDE_LOCAL_FLAG
+  INCLUDE_REMOTE=$INCLUDE_REMOTE_FLAG
+fi
+
+# No-argument invocation shows local and remote rows for the current branch.
+if [[ -z "$TARGET_BRANCH" && -z "$BRANCH_PATTERN" &&
+    "$INCLUDE_LOCAL_FLAG" == false && "$INCLUDE_REMOTE_FLAG" == false ]]; then
+  NO_ARG_MODE=true
+fi
+
+# Arguments are validated; the shared library performs the work.
+bt_branch_status_run
