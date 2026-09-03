@@ -244,8 +244,10 @@ generate_pngs() {
     temp_rel="${temp_svg#"${repo_root}"/}"
 
     cp "$doc_svg_template" "$temp_svg"
-    DOC_TITLE="$doc_title" perl -i -pe \
-      's/Catch it before it breaks\./$ENV{DOC_TITLE}/g' "$temp_svg"
+    # Tagline is the last <text> element in the template, regardless of wording.
+    DOC_TITLE="$doc_title" perl -0777 -i -pe \
+      's/(<text[^>]*>)[^<]*(<\/text>)(?!.*<text)/${1}$ENV{DOC_TITLE}${2}/s' \
+      "$temp_svg"
 
     log_verbose "converting ${temp_rel} -> ${dst#"${repo_root}"/}"
     write_png_if_changed "$temp_svg" "$dst"

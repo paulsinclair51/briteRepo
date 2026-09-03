@@ -23,7 +23,7 @@ yellow fill, added black dot eye, and overlaid triangle for beak.
 background.
 
 **Logo_with_Tagline.svg**: monogram, brand name, and tagline
-"Catch it before it breaks." with transparent background.
+"Source Code Management made easy." with transparent background.
 
 **Monogram.svg**: Monogram-only `bT` with canary accent perched on T in a
 rounded-square.
