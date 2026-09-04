@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+
+# setupclone - Activate Git hook safeguards for the current repository.
+#
+# See usage below for details, or run: setupclone -h
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see '<repo>/LICENSE'.
+
+usage() {
+  cat <<'EOF'
+Usage:
+  setupclone
+  setupclone {-h | --help}
+
+Activate local repository safeguards for the repository in the current
+working directory.
+
+This script configures Git to use the shared, installed .githooks/
+directory (core.hooksPath) for the current repository. Run it once per
+repository clone; briteRepo itself is installed separately (see the
+Guide's Installation section), not per clone.
+
+When run from a briteRepo clone's own briterepo/bin/ (as opposed to an
+installed copy), that directory is also prepended to PATH ahead of any
+installed copy, so local script changes take effect immediately. This
+override replaces any previous one; only one clone's scripts take
+priority at a time.
+
+Options:
+  -h, --help  Output this help to stdout and exit (other options
+              and arguments are ignored).
+
+Examples:
+  # Activate Git hook safeguards for the repository in this directory
+  cd my-project
+  setupclone
+
+Outputs:
+  - Writes status messages to stdout.
+  - Writes errors and diagnostics to stderr.
+  - Modifies the current repository's local Git config (core.hooksPath).
+  - From a briteRepo clone's own briterepo/bin/, modifies ~/.bashrc to
+    prepend that directory to PATH.
+
+Exit codes:
+  0  Success
+  1  Invalid option, or not run from inside a Git repository
+  2  Failed to configure Git hooks
+EOF
+}
+
+# High-Level Flow:
+# - Reject any arguments other than -h/--help.
+# - If run from a briteRepo clone's own briterepo/bin/ (not the central
+#   install), prepend it to PATH ahead of any installed copy.
+# - Require the current working directory to be inside a Git repository.
+# - Point core.hooksPath at this installation's sibling helpers/.githooks.
+
+set -euo pipefail
+
+readonly EXIT_INVALID_ARGUMENT=1
+readonly EXIT_HOOKS_FAILED=2
+
+bt_emit_error() {
+  printf 'Error: %s\n' "$1" >&2
+}
+
+usage_error() {
+  usage
+  echo >&2
+  bt_emit_error "$1. See usage above for details."
+  exit "$EXIT_INVALID_ARGUMENT"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    *) usage_error "Unknown argument: $arg" ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+hooks_dir="$SCRIPT_DIR/helpers/.githooks"
+
+# From a briteRepo clone's own briterepo/bin/ (not the central install),
+# prepend it to PATH so local script edits take precedence over any
+# installed copy. Only one clone's override is kept active at a time.
+central_install_bin="$HOME/briterepo/bin"
+if [[ "$SCRIPT_DIR" != "$central_install_bin" ]]; then
+  dev_marker="# briterepo-dev-clone"
+  dev_path_line="export PATH=\"$SCRIPT_DIR:\$PATH\" $dev_marker"
+  touch ~/.bashrc
+  if ! grep -qxF "$dev_path_line" ~/.bashrc; then
+    dev_tmp="$(mktemp)"
+    grep -vF "$dev_marker" ~/.bashrc > "$dev_tmp" || true
+    mv "$dev_tmp" ~/.bashrc
+    echo "$dev_path_line" >> ~/.bashrc
+    echo "Added $SCRIPT_DIR to PATH ahead of any installed copy (~/.bashrc)."
+    echo "Reload your shell to use it: source ~/.bashrc && hash -r"
+  fi
+fi
+
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  bt_emit_error "Not inside a Git repository. Run this from the repository you want to configure."
+  exit "$EXIT_INVALID_ARGUMENT"
+fi
+repo_root="$(git rev-parse --show-toplevel)"
+
+echo "Configuring Git hooks for $repo_root..."
+
+hook_installer="$SCRIPT_DIR/helpers/install_git_hooks.sh"
+if [[ ! -f "$hook_installer" ]]; then
+  bt_emit_error "Hook installer not found at $hook_installer"
+  exit "$EXIT_HOOKS_FAILED"
+fi
+
+if ! (cd "$repo_root" && bash "$hook_installer"); then
+  bt_emit_error "Failed to configure Git hooks. Run manually: cd $repo_root && bash $hook_installer"
+  exit "$EXIT_HOOKS_FAILED"
+fi
+
+echo "Git hooks for $repo_root are now:"
+echo "  - Configured to use the shared hooks directory ($hooks_dir)"
+echo "  - Active immediately"
+echo "  - Will run on checkout and other git operations"
+

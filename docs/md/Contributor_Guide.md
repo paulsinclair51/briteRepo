@@ -3,7 +3,7 @@
 #### Version: v1.0.0
 
 This guide explains how contributors, reviewers, and approvers prepare, test,
-review, and publish changes to the repository.
+review, and publish changes to the repository using briteRepo.
 
 #### Copyright (c) 2026 Paul Sinclair
 
@@ -100,9 +100,9 @@ commands handle the underlying Git and GitHub operations, policy checks,
 reporting, and recovery so contributors can work with branches, changes,
 reviews, and releases without managing low-level source-control details.
 
-Use the commands in `briteRepo/bin/` for repository-changing actions. After
+Use the commands in `briterepo/bin/` for repository-changing actions. After
 `setupclone`, they are normally available by name. You may also run them by
-path, such as `briteRepo/bin/commit`.
+path, such as `briterepo/bin/commit`.
 
 | Task | Command |
 |------|---------|
@@ -133,8 +133,12 @@ and macOS, run them from a Bash-compatible terminal. On Windows, use WSL, Git
 Bash, or MSYS2. Native Command Prompt and PowerShell do not run these scripts
 directly, but they can launch a script through an installed `bash` executable.
 
-1. Create the clone with `mkclone`. It configures the commands and local
-   safeguards required by the workflow.
+briteRepo is installed once per user account, separately from any
+repository you use it to manage. If it is not already installed, see
+[Installation](#14-installation) in the Guide, then return here.
+
+1. Create the clone with `mkclone`. It clones the repository and
+   configures Git hook safeguards for it.
 2. Enter the new repository directory.
 3. Authenticate the GitHub CLI with `gh auth login`.
 4. Confirm that your GitHub login appears in `config/contributors.md`.

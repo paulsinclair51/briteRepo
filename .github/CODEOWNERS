@@ -64,7 +64,7 @@
 #   1. '<repo>/.github/workflows/branch-name-validation.yml' for the GitHub
 #      branch name validation workflow.
 #   
-#   2. '<repo>/briteRepo/bin/setup_rulesets' for the script used to set up or
+#   2. '<repo>/briterepo/bin/setup_rulesets' for the script used to set up or
 #      redefine the repository rulesets.
 #
 #   3. '<repo>/docs/md/Contributor_Guide.md' for more information about

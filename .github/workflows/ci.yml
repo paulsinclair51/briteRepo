@@ -52,7 +52,7 @@ jobs:
 
       - name: Generate docs PDFs (excluding docs/md/README.md)
         run: |
-          bash ./briteRepo/helpers/genpdf.sh \
+          bash ./briterepo/bin/helpers/genpdf.sh \
             -i "*.md" -x "README.md" docs/md docs/pdf
 
       - name: Run report helper tests

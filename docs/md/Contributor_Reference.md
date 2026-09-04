@@ -104,7 +104,7 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 | `mkrepo` | [1.2.10](#1210-mkrepo) | `setupclone` | [1.2.3](#123-setupclone) |
 | `override` | [1.2.8](#128-override) | `undo` | [1.1.15](#1115-undo) |
 
-1. [Command Reference (`briteRepo/bin/`)](#1-command-reference-scriptsbin)<br>
+1. [Command Reference (`briterepo/bin/`)](#1-command-reference-scriptsbin)<br>
    1.1. [Workflow Management](#11-workflow-management)<br>
    1.2. [Repository and Clone Management](#12-repository-and-clone-management)<br>
    1.3. [Documentation and Branding](#13-documentation-and-branding)<br>
@@ -133,11 +133,11 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 </details>
 
 <details>
-<summary><strong>1. Command Reference (briteRepo/bin/)</strong></summary>
+<summary><strong>1. Command Reference (briterepo/bin/)</strong></summary>
 
-## 1. Command Reference (briteRepo/bin/)
+## 1. Command Reference (briterepo/bin/)
 
-Standalone executable scripts located in `briteRepo/bin/`. For full usage
+Standalone executable scripts located in `briterepo/bin/`. For full usage
 information, run any script with `-h` or `--help`.
 
 <details>
@@ -642,13 +642,13 @@ safeguards are active.
 **Usage:**
 
 ```bash
-bash briteRepo/bin/setupclone [-t SEC]
+bash briterepo/bin/setupclone [-t SEC]
 ```
 
 **Functions:**
 
 - Make all scripts executable
-- Add `briteRepo/bin/` to PATH in `~/.bashrc`
+- Add `briterepo/bin/` to PATH in `~/.bashrc`
 - Activate local repository safeguards
 - Load configuration immediately
 </details>
@@ -793,7 +793,7 @@ The authenticated GitHub user must have repository administration permission.
 #### 1.2.10. mkrepo
 
 **Purpose:** Create a GitHub repository, or update an existing one, so it has
-the canonical directory layout used by the `briteRepo/bin/` commands.
+the canonical directory layout used by the `briterepo/bin/` commands.
 
 **Usage:**
 
@@ -817,9 +817,9 @@ working clone.
 - `--public` - Create a public repository; the default is private.
 - `--rulesets` - Run `setup_rulesets` for the repository after the push.
   Repository administration permission and `jq` are required.
-- `--tests` - Also refresh the `briteRepo/tests/` scripts.
+- `--tests` - Also refresh the `briterepo/tests/` scripts.
 
-**Behavior:** `briteRepo/bin/`, `briteRepo/helpers/`, and
+**Behavior:** `briterepo/bin/`, `briterepo/bin/helpers/`, and
 `.github/workflows/` are replaced with a fresh copy. The command also adds
 `docs/md/Guide.md` as the repository introduction with `README.md` linked to
 it, copies the Contributor documents from `docs/md/`, and creates default
@@ -1035,7 +1035,7 @@ grant the approver permission.
 | Path or Setting | Public | User | Contributor | Reviewer | Approver | Owner |
 |-----------------|--------|------|-------------|----------|----------|-------|
 | `docs/md/`, `docs/branding/`, `src/`, `include/`, `examples/` | R | R | RW | RW | RW | RW |
-| `briteRepo/bin/`, `briteRepo/helpers/` | R | R | RW | RW | RW | RW |
+| `briterepo/bin/`, `briterepo/bin/helpers/` | R | R | RW | RW | RW | RW |
 | `config/contributors.md` | R | R | - | - | RW | RW |
 | `.github/workflows/` | R | R | - | - | - | RW* |
 | GitHub rulesets and branch-protection settings | R | R | - | - | - | RW* |

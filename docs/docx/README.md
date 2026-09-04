@@ -11,7 +11,7 @@ See `<repo>/README.md` for an introduction to the repository.
 ## Files
 
 ***.docx**: `.docx` files generated from the `<repo>/docs/pdf/*.pdf` files
-using `<repo>/briteRepo/bin/gendocs`.
+using `<repo>/briterepo/bin/gendocs`.
 
 **README.md**: This directory guide.
 

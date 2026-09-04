@@ -17,16 +17,16 @@ See `<repo>/README.md` for an introduction to the repository.
 `pushup`, `pulldown`, or `copyfix`.
 
 **local-\<datetime>.md**: Latest untracked activity report for a local branch from
-`<repo>/briteRepo/bin/report`.
+`<repo>/briterepo/bin/report`.
 
 **mkrepo-\<datetime>.md**: Latest untracked report from
-`<repo>/briteRepo/bin/mkrepo`, including remaining follow-up items.
+`<repo>/briterepo/bin/mkrepo`, including remaining follow-up items.
 
 **mkrepo-d-\<datetime>.md**: Latest untracked dry-run report from
-`<repo>/briteRepo/bin/mkrepo`.
+`<repo>/briterepo/bin/mkrepo`.
 
 **mkrepo-e-\<datetime>.md**: Latest untracked error report from
-`<repo>/briteRepo/bin/mkrepo`.
+`<repo>/briterepo/bin/mkrepo`.
 
 **rebrand-\<datetime>.md**: Latest untracked brand update report.
 
@@ -37,17 +37,17 @@ See `<repo>/README.md` for an introduction to the repository.
 **release-e-\<datetime>.md**: Latest release error-run report.
 
 **remote-\<datetime>.md**: Latest untracked activity report for a remote branch
-from `<repo>/briteRepo/bin/report`.
+from `<repo>/briterepo/bin/report`.
 
 **repo-\<datetime>.md**: Latest untracked repository health and branch status report from
-`<repo>/briteRepo/bin/report`.
+`<repo>/briterepo/bin/report`.
 
 **repository-\<datetime>.md**: Repository diagnostic report.
 
 **retarget-e-\<datetime>.md**: Latest retarget error-run report.
 
 **style-\<datetime>.md**: Latest untracked style report from
-`<repo>/briteRepo/bin/report`.
+`<repo>/briterepo/bin/report`.
 
 **undo-\<type>-\<n>-\<datetime>.md**: Untracked successful undo report,
 where `n` identifies its position in the current consecutive undo sequence.
