@@ -527,11 +527,20 @@ If local safeguards are missing, run `fixlocal` to restore them.
   gives a fresh briteRepo clone PATH priority over any installed copy by
   adding a line marked `# briterepo-dev-clone` to `~/.bashrc`; `rmclone`
   removes that line when the clone is removed. If this line is ever lost or
-  points at the wrong clone, fix it manually: remove any existing line
-  containing `# briterepo-dev-clone` from `~/.bashrc`, then add
-  `export PATH="<path-to-clone>/briterepo/bin:$PATH" # briterepo-dev-clone`
-  (replacing `<path-to-clone>` with the clone's path), then run
-  `source ~/.bashrc && hash -r`.
+  points at the wrong clone, fix it manually:
+
+  1. Remove any existing line containing `# briterepo-dev-clone` from `~/.bashrc`.
+  2. Add this line to `~/.bashrc` (replacing `/path/to/clone` with your actual clone path):
+     ```bash
+     export PATH="/path/to/clone/briterepo/bin:$PATH" # briterepo-dev-clone
+     ```
+  3. Reload the shell: `source ~/.bashrc`
+  4. Verify commands work: `lsbranch -a` or another briteRepo command.
+
+  Example: if your clone is at `/workspaces/briteRepo`:
+  ```bash
+  export PATH="/workspaces/briteRepo/briterepo/bin:$PATH" # briterepo-dev-clone
+  ```
 </details>
 
 <details>
