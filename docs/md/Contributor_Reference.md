@@ -65,9 +65,8 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 
 **Find by task**
 
-- **Set up:** [`mkclone`](#124-mkclone), [`setupclone`](#123-setupclone),
-  [`mkfork`](#125-mkfork), [`mkrepo`](#1210-mkrepo),
-  [`setup_rulesets`](#129-setup_rulesets)
+- **Set up:** [`mkclone`](#123-mkclone), [`mkfork`](#124-mkfork),
+  [`mkrepo`](#129-mkrepo), [`setup_rulesets`](#128-setup_rulesets)
 - **Work on a change:** [`chbranch`](#111-chbranch),
   [`mkbranch`](#117-mkbranch), [`commit`](#112-commit),
   [`push`](#1116-push), [`pull`](#118-pull),
@@ -78,8 +77,8 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 - **Inspect and undo:** [`lsbranch`](#115-lsbranch),
   [`report`](#116-report), [`undo`](#1115-undo),
   [`rmbranch`](#1114-rmbranch)
-- **Repair:** [`fixlocal`](#121-fixlocal), [`fixrepo`](#127-fixrepo),
-  [`fixremote`](#122-fixremote), [`override`](#128-override)
+- **Repair:** [`fixlocal`](#121-fixlocal), [`fixrepo`](#126-fixrepo),
+  [`fixremote`](#122-fixremote), [`override`](#127-override)
 - **Documentation and branding:** [`report style`](#131-report-style),
   [`gendocs`](#132-gendocs), [`genpngs`](#133-genpngs),
   [`rebrand`](#134-rebrand), [`replacetext`](#135-replacetext)
@@ -94,17 +93,17 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 | `feedback` | [1.1.4](#114-feedback) | `pushup` | [1.1.10](#1110-pushup) |
 | `fixlocal` | [1.2.1](#121-fixlocal) | `rebrand` | [1.3.4](#134-rebrand) |
 | `fixremote` | [1.2.2](#122-fixremote) | `release` | [1.1.11](#1111-release) |
-| `fixrepo` | [1.2.7](#127-fixrepo) | `replacetext` | [1.3.5](#135-replacetext) |
+| `fixrepo` | [1.2.6](#126-fixrepo) | `replacetext` | [1.3.5](#135-replacetext) |
 | `gendocs` | [1.3.2](#132-gendocs) | `report` | [1.1.6](#116-report) |
 | `genpngs` | [1.3.3](#133-genpngs) | `retarget` | [1.1.12](#1112-retarget) |
 | `lsbranch` | [1.1.5](#115-lsbranch) | `review` | [1.1.13](#1113-review) |
 | `mkbranch` | [1.1.7](#117-mkbranch) | `rmbranch` | [1.1.14](#1114-rmbranch) |
-| `mkclone` | [1.2.4](#124-mkclone) | `rmclone` | [1.2.6](#126-rmclone) |
-| `mkfork` | [1.2.5](#125-mkfork) | `setup_rulesets` | [1.2.9](#129-setup_rulesets) |
-| `mkrepo` | [1.2.10](#1210-mkrepo) | `setupclone` | [1.2.3](#123-setupclone) |
-| `override` | [1.2.8](#128-override) | `undo` | [1.1.15](#1115-undo) |
+| `mkclone` | [1.2.3](#123-mkclone) | `rmclone` | [1.2.5](#125-rmclone) |
+| `mkfork` | [1.2.4](#124-mkfork) | `setup_rulesets` | [1.2.8](#128-setup_rulesets) |
+| `mkrepo` | [1.2.9](#129-mkrepo) | `undo` | [1.1.15](#1115-undo) |
+| `override` | [1.2.7](#127-override) | | |
 
-1. [Command Reference (`briteRepo/bin/`)](#1-command-reference-scriptsbin)<br>
+1. [Command Reference (`briterepo/bin/`)](#1-command-reference-scriptsbin)<br>
    1.1. [Workflow Management](#11-workflow-management)<br>
    1.2. [Repository and Clone Management](#12-repository-and-clone-management)<br>
    1.3. [Documentation and Branding](#13-documentation-and-branding)<br>
@@ -133,11 +132,11 @@ see [Contributor_Internal_Guide.md](./Contributor_Internal_Guide.md) and
 </details>
 
 <details>
-<summary><strong>1. Command Reference (briteRepo/bin/)</strong></summary>
+<summary><strong>1. Command Reference (briterepo/bin/)</strong></summary>
 
-## 1. Command Reference (briteRepo/bin/)
+## 1. Command Reference (briterepo/bin/)
 
-Standalone executable scripts located in `briteRepo/bin/`. For full usage
+Standalone executable scripts located in `briterepo/bin/`. For full usage
 information, run any script with `-h` or `--help`.
 
 <details>
@@ -632,31 +631,9 @@ the `report` command.
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.3. setupclone</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.3. mkclone</summary>
 
-#### 1.2.3. setupclone
-
-**Purpose:** Configure a clone so project commands are available and local
-safeguards are active.
-
-**Usage:**
-
-```bash
-bash briteRepo/bin/setupclone [-t SEC]
-```
-
-**Functions:**
-
-- Make all scripts executable
-- Add `briteRepo/bin/` to PATH in `~/.bashrc`
-- Activate local repository safeguards
-- Load configuration immediately
-</details>
-
-<details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.4. mkclone</summary>
-
-#### 1.2.4. mkclone
+#### 1.2.3. mkclone
 
 **Purpose:** Clone the repository with optional target naming.
 
@@ -671,9 +648,9 @@ timeout.
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.5. mkfork</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.4. mkfork</summary>
 
-#### 1.2.5. mkfork
+#### 1.2.4. mkfork
 
 **Purpose:** Create a fork of the repository and optionally connect it to the
 source repository.
@@ -694,9 +671,9 @@ mkfork [OPTIONS]
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.6. rmclone</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.5. rmclone</summary>
 
-#### 1.2.6. rmclone
+#### 1.2.5. rmclone
 
 **Purpose:** Safely remove a local clone with validation checks.
 
@@ -715,9 +692,9 @@ rmclone [OPTIONS] <clone-path>
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.7. fixrepo</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.6. fixrepo</summary>
 
-#### 1.2.7. fixrepo
+#### 1.2.6. fixrepo
 
 **Purpose:** Check repository health, apply safe repairs, and generate a
 repository report. One additional clone may be checked in the same run.
@@ -745,9 +722,9 @@ Open that file for details; these diagnostics are not generated by the
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.8. override</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.7. override</summary>
 
-#### 1.2.8. override
+#### 1.2.7. override
 
 **Purpose:** Enable or disable an exceptional repository-owner recovery mode
 for the current clone or a temporary remote repair authorization window.
@@ -769,17 +746,18 @@ Use `fixlocal`, `fixrepo`, and `fixremote` before `override` when possible.
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.9. setup_rulesets</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.8. setup_rulesets</summary>
 
-#### 1.2.9. setup_rulesets
+#### 1.2.8. setup_rulesets
 
 **Purpose:** Create, update, or verify the GitHub rulesets that protect `main`
-and version branches.
+and version branches. `fixlocal` invokes this automatically for repository
+owners with `gh` and `jq` installed.
 
 **Usage:**
 
 ```bash
-setup_rulesets [--check] [OWNER/REPOSITORY]
+bash briterepo/bin/helpers/setup_rulesets.sh [--check] [OWNER/REPOSITORY]
 ```
 
 **Key Option:** `--check` verifies the live rulesets without changing them.
@@ -788,12 +766,12 @@ The authenticated GitHub user must have repository administration permission.
 </details>
 
 <details>
-<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.10. mkrepo</summary>
+<summary>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.2.9. mkrepo</summary>
 
-#### 1.2.10. mkrepo
+#### 1.2.9. mkrepo
 
 **Purpose:** Create a GitHub repository, or update an existing one, so it has
-the canonical directory layout used by the `briteRepo/bin/` commands.
+the canonical directory layout used by the `briterepo/bin/` commands.
 
 **Usage:**
 
@@ -817,9 +795,9 @@ working clone.
 - `--public` - Create a public repository; the default is private.
 - `--rulesets` - Run `setup_rulesets` for the repository after the push.
   Repository administration permission and `jq` are required.
-- `--tests` - Also refresh the `briteRepo/tests/` scripts.
+- `--tests` - Also refresh the `briterepo/tests/` scripts.
 
-**Behavior:** `briteRepo/bin/`, `briteRepo/helpers/`, and
+**Behavior:** `briterepo/bin/`, `briterepo/bin/helpers/`, and
 `.github/workflows/` are replaced with a fresh copy. The command also adds
 `docs/md/Guide.md` as the repository introduction with `README.md` linked to
 it, copies the Contributor documents from `docs/md/`, and creates default
@@ -849,7 +827,7 @@ include adding contributor logins and roles to `config/contributors.md`,
 setting `config/version_status.md`, replacing the placeholder text in
 `docs/md/Guide.md`, replacing the default branding with `rebrand` and
 `genpngs`, running `setup_rulesets` unless `--rulesets` was used, and
-preparing a working clone with `mkclone` and `setupclone`.
+preparing a working clone with `mkclone`.
 
 **Prerequisite:** No local clone or checkout of the target repository may be
 in use, because `mkrepo` pushes directly to the default branch. `mkrepo`
@@ -1035,7 +1013,7 @@ grant the approver permission.
 | Path or Setting | Public | User | Contributor | Reviewer | Approver | Owner |
 |-----------------|--------|------|-------------|----------|----------|-------|
 | `docs/md/`, `docs/branding/`, `src/`, `include/`, `examples/` | R | R | RW | RW | RW | RW |
-| `briteRepo/bin/`, `briteRepo/helpers/` | R | R | RW | RW | RW | RW |
+| `briterepo/bin/`, `briterepo/bin/helpers/` | R | R | RW | RW | RW | RW |
 | `config/contributors.md` | R | R | - | - | RW | RW |
 | `.github/workflows/` | R | R | - | - | - | RW* |
 | GitHub rulesets and branch-protection settings | R | R | - | - | - | RW* |
@@ -1121,7 +1099,8 @@ automation and troubleshooting aligned with the executable interface.
 
 **Solution:**
 
-Run `setupclone` to restore command permissions and local configuration.
+Run `fixlocal` to restore Git hooks configuration, or `mkclone` to create a
+fresh clone.
 
 #### Role Check Fails for Known Approver/Reviewer
 

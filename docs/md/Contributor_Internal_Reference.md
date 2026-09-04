@@ -2,8 +2,9 @@
 
 #### Version: v1.0.0
 
-This reference records implementation contracts for repository repair, helper
-modules, Git hooks, environment variables, and GitHub-side enforcement.
+This reference records briteRepo implementation contracts for repository
+repair, helper modules, Git hooks, environment variables, and GitHub-side
+enforcement.
 
 #### Copyright (c) 2026 Paul Sinclair
 
@@ -242,10 +243,11 @@ restore the protection immediately.
 - `mkrepo` pushes directly to the default branch and is a repository setup
   operation, not a contributor workflow path. It requires that the default
   branch is unprotected and that no local clone of the target is in use, and
-  it never deletes existing content outside the `briteRepo/` script
+  it never deletes existing content outside the `briterepo/` script
   directories and `.github/workflows/`, which it replaces with a fresh copy.
   Server-side enforcement is only complete once those workflows are present
-  and `setup_rulesets` has been run for the repository.
+  and `setup_rulesets.sh` (in `briterepo/bin/helpers/`) has been run for the
+  repository.
 
 This document records the explicit limitations of the owner override and the
 server-side administrative authority required for protected remote repair.
@@ -257,7 +259,7 @@ server-side administrative authority required for protected remote repair.
 ## 5. Internal Helpers and Hooks
 
 These files are implementation modules, not contributor commands. Public
-workflows must invoke the corresponding command in `briteRepo/bin/`.
+workflows must invoke the corresponding command in `briterepo/bin/`.
 
 <details>
 <summary>&nbsp;&nbsp;&nbsp;&nbsp;5.1. Helper Modules</summary>
@@ -289,7 +291,7 @@ individual function signatures.
 
 ### 5.2. Git Hooks
 
-Hooks are stored in `briteRepo/helpers/.githooks/` and selected through
+Hooks are stored in `briterepo/bin/helpers/.githooks/` and selected through
 `core.hooksPath`.
 
 | Hook | Contract |

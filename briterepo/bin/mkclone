@@ -1,0 +1,404 @@
+#!/usr/bin/env bash
+
+# mkclone - Clone a repository and automatically configure its Git hooks.
+#
+# See usage below for details, or run: mkclone -h
+#
+# Copyright (c) 2026 Paul Sinclair
+# SPDX-License-Identifier: MIT
+# For license details, see '<repo>/LICENSE'.
+
+usage() {
+  cat <<EOF
+Usage:
+  mkclone [OPTIONS] [directory]
+  mkclone {-h | --help}
+
+Clone a repository to a local directory with automatic Git hook setup.
+
+Prerequisites:
+  - Must be run on a machine with bash and git installed.
+  - Network access to GitHub (https://github.com).
+  - The target directory must not already exist.
+
+Note: This script can be run from ANY directory on your local machine.
+
+This script:
+  - Clones the repository to a target directory.
+  - Automatically configures Git hooks for the new clone (no manual steps
+    required). Git hooks protect against accidental direct git commands.
+  - Does not install or PATH scripts; that is a one-time, per-user step
+    (see the Guide's Installation section), not repeated for each clone.
+  - Allows only one clone of the briteRepo repository itself per user on
+    this machine, since cloning it also switches PATH to that clone's
+    scripts; remove the existing one with rmclone before cloning another.
+
+Arguments:
+  [DIRECTORY]        Optional target directory name
+                     If not specified, uses the repository name
+                     Examples: mkclone -r owner/repo
+                                 -> Creates ./repo/
+                                mkclone -r owner/repo my-workspace
+                                 -> Creates ./my-workspace/
+
+Options:
+  -r REPO     Repository to clone: a full URL, or 'owner/repo' shorthand
+              resolved against https://github.com. Defaults to the
+              'origin' remote of the repository in the current working
+              directory, if any.
+  -h, --help  Output this help to stdout and exit (other options and
+              arguments are ignored).
+  -t SEC      Remote operation timeout in seconds (default: 10).
+              SEC must be an integer greater than 0.
+
+Examples:
+  # Clone another repository by name
+  mkclone -r owner/repo
+    -> Creates ./repo/ with Git hooks configured
+
+  # Clone the repository you are currently in, into a new directory
+  mkclone my-workspace
+    -> Creates ./my-workspace/ with Git hooks configured
+
+Outputs:
+  - Writes help text, status messages, and results or summaries to stdout.
+  - Writes errors and diagnostics to stderr.
+
+Exit codes:
+  0   Success.
+  1   Argument error.
+  2   Git clone failed.
+  3   Target directory already exists.
+  4   Failed to configure Git hooks.
+  5   Missing required tools (git, bash), or no repository could be
+      determined.
+  6   Another briteRepo clone already exists on this machine for the user.
+EOF
+}
+
+# High-Level Flow:
+# - Can run from ANY directory on your local machine
+# - Does NOT require bash helpers upfront
+# - Resolves the repository to clone from -r, or from the current working
+#   directory's 'origin' remote if -r is not given.
+# - Clones the resolved repository URL into a default or user-specified
+#   target directory.
+# - Validates arguments and target-path preconditions before cloning.
+# - Configures Git hooks for the new clone (core.hooksPath), pointing at
+#   this script's own sibling helpers/.githooks.
+# - Reports clone results and prints next-step workflow guidance.
+
+# shellcheck disable=SC1091  # Helper source paths are resolved at runtime.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HISTORY_HELPER="$SCRIPT_DIR/helpers/history_log.sh"
+GIT_HELPER="$SCRIPT_DIR/helpers/git_helpers.sh"
+COMMON_HELPER="$SCRIPT_DIR/helpers/common.sh"
+
+bt_emit_error() {
+  printf 'Error: %s\n' "$1" >&2
+}
+
+# Shared helpers
+if [[ ! -f "$COMMON_HELPER" ]]; then
+  bt_emit_error "Required helper not found: $COMMON_HELPER"
+  exit 5
+fi
+# shellcheck source=helpers/common.sh disable=SC1091
+if ! source "$COMMON_HELPER"; then
+  bt_emit_error "Failed to load helper: $COMMON_HELPER"
+  exit 5
+fi
+if [[ ! -f "$HISTORY_HELPER" ]]; then
+  bt_emit_error "Required helper not found: $HISTORY_HELPER"
+  exit 5
+fi
+# shellcheck source=helpers/history_log.sh disable=SC1091
+if ! source "$HISTORY_HELPER"; then
+  bt_emit_error "Failed to load helper: $HISTORY_HELPER"
+  exit 5
+fi
+# shellcheck disable=SC1090  # Path is resolved relative to this script.
+if [[ ! -f "$GIT_HELPER" ]] || ! source "$GIT_HELPER"; then
+  bt_emit_error "Failed to load helper: $GIT_HELPER"
+  exit 5
+fi
+
+readonly EXIT_INVALID_ARGUMENT=1
+
+usage_error() {
+  local message="$1"
+  usage
+  echo >&2
+  bt_emit_error "$message. See usage above for details."
+  exit "$EXIT_INVALID_ARGUMENT"
+}
+
+# Default options
+REPO_ARG=""
+TARGET_DIR=""
+REMOTE_TIMEOUT_SECONDS=10
+
+# Simple output helpers (no external dependency)
+info() {
+  echo "[INFO] $1"
+}
+
+success() {
+  echo "[SUCCESS] $1"
+}
+
+warn() {
+  echo "[WARN] $1"
+}
+
+error_exit() {
+  local code="$1"
+  local message="$2"
+  bt_emit_error "$message"
+  exit "$code"
+}
+
+# Check for required tools
+check_requirements() {
+  local missing=()
+  
+  if ! command -v git &> /dev/null; then
+    missing+=("git")
+  fi
+  
+  if ! command -v bash &> /dev/null; then
+    missing+=("bash")
+  fi
+  
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    error_exit 5 "Missing required tools: ${missing[*]}"
+  fi
+}
+
+# Parse options and arguments
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -r)
+      [[ $# -ge 2 && -n "$2" ]] || usage_error "Option -r requires a repository"
+      REPO_ARG="$2"
+      shift 2
+      ;;
+    -t)
+      [[ $# -ge 2 ]] || usage_error "Option -t requires SEC"
+      bt_is_valid_remote_timeout "$2" || \
+        usage_error "SEC for -t must be an integer greater than 0"
+      REMOTE_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
+    -*)
+      usage_error "Unknown option: $1"
+      ;;
+    *)
+      # Positional argument
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Restore positional arguments
+set -- "${POSITIONAL_ARGS[@]}"
+export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
+
+# Resolve the repository to clone: -r (URL or 'owner/repo' shorthand), or
+# else the 'origin' remote of the repository in the current directory.
+if [[ -n "$REPO_ARG" ]]; then
+  case "$REPO_ARG" in
+    http://*|https://*|git@*|ssh://*)
+      REPO_URL="$REPO_ARG"
+      ;;
+    /*|./*|../*)
+      # A local path, not GitHub 'owner/repo' shorthand.
+      REPO_URL="$REPO_ARG"
+      ;;
+    */*)
+      REPO_URL="https://github.com/$REPO_ARG.git"
+      ;;
+    *)
+      usage_error "Invalid -r value: $REPO_ARG (expected a URL or owner/repo)"
+      ;;
+  esac
+  REPO_NAME="$(basename "$REPO_URL" .git)"
+elif git rev-parse --git-dir >/dev/null 2>&1; then
+  REPO_URL="$(git remote get-url origin 2>/dev/null || true)"
+  REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
+else
+  REPO_URL=""
+  REPO_NAME=""
+fi
+
+if [[ -z "$REPO_URL" ]]; then
+  error_exit 5 "No repository specified. Pass -r REPO, or run from inside a clone that has an 'origin' remote."
+fi
+
+# Check that we have at most 1 positional argument
+if [[ $# -gt 1 ]]; then
+  usage_error "Expected at most 1 argument (directory), got $#"
+fi
+
+# Determine target directory
+if [[ $# -eq 1 ]]; then
+  TARGET_DIR="$1"
+else
+  TARGET_DIR="$REPO_NAME"
+fi
+
+# Validate target directory name
+if [[ -z "$TARGET_DIR" ]]; then
+  usage_error "Target directory name cannot be empty"
+fi
+
+# Check if target directory already exists
+if [[ -e "$TARGET_DIR" ]]; then
+  error_exit 3 "Target directory '$TARGET_DIR' already exists"
+fi
+
+# Only one clone of briteRepo itself is allowed per user on this machine:
+# cloning it switches PATH to that clone's scripts (see mkclone -h), so a
+# second one would make script resolution ambiguous.
+if [[ "${REPO_NAME,,}" == "briterepo" ]]; then
+  existing_dev_bin="$(bt_dev_clone_bin_path || true)"
+  if [[ -n "$existing_dev_bin" ]]; then
+    existing_dev_clone="${existing_dev_bin%/briterepo/bin}"
+    if [[ -d "$existing_dev_clone" ]]; then
+      error_exit 6 "A briteRepo clone already exists at $existing_dev_clone. Remove it with rmclone before cloning another."
+    fi
+  fi
+fi
+
+# Check requirements before starting
+check_requirements
+
+# Clone the repository
+info "Cloning repository..."
+if ! bt_run_remote_command git clone "$REPO_URL" "$TARGET_DIR" 2>&1; then
+  error_exit 2 "Failed to clone repository from $REPO_URL"
+fi
+
+success "Repository cloned successfully"
+
+# Display repository information
+info "Repository: $REPO_URL"
+info "Cloned to: ./$TARGET_DIR"
+
+# Configure Git hooks for the new clone, using this script's own bundled
+# .githooks (hooks come from wherever the running tooling lives, shared
+# across all repos, not a per-repo vendored copy; see install_git_hooks.sh).
+info "Configuring Git hooks..."
+hook_installer="$SCRIPT_DIR/helpers/install_git_hooks.sh"
+if [[ -f "$hook_installer" ]] && \
+  (cd "$TARGET_DIR" && bash "$hook_installer" --silent) >/dev/null 2>&1; then
+  success "Git hooks configured successfully"
+else
+  warn "Warning: Failed to configure Git hooks"
+  info "You can configure them manually by running:"
+  info "  cd $TARGET_DIR"
+  info "  bash $hook_installer"
+fi
+
+# When the clone is briteRepo itself, also prepend it to PATH ahead of any
+# installed copy, so local script changes take effect immediately (undone
+# by rmclone when that clone is removed; see rmclone -h).
+if [[ "${REPO_NAME,,}" == "briterepo" ]]; then
+  clone_bin_dir="$(cd "$TARGET_DIR" && pwd)/briterepo/bin"
+  if bt_set_dev_clone_path "$clone_bin_dir"; then
+    success "PATH updated to use this clone's scripts"
+  else
+    warn "Warning: Failed to update PATH for this clone"
+    info "See the Contributor Guide for how to set this manually."
+  fi
+fi
+
+# Enforce policy: do not leave a local 'main' branch in the clone.
+if git -C "$TARGET_DIR" show-ref --verify --quiet refs/heads/main; then
+  targeted_branch_re=""
+  version_branch_re=""
+  non_priority_branch_re=""
+
+  info "Applying branch policy: removing local 'main' from clone..."
+
+  current_branch="$(git -C "$TARGET_DIR" rev-parse --abbrev-ref HEAD \
+    2>/dev/null || true)"
+
+  # Preferred fallback order when choosing a non-main local branch:
+  # 1) targeted branch, 2) contributor branch, 3) version branch,
+  # 4) detach at origin/main.
+  targeted_branch_re='^(dev|fix)/[a-z0-9][a-z0-9-]*-v[1-9][0-9]?\.'
+  targeted_branch_re+='(0|[1-9][0-9]?)\.0$'
+  version_branch_re='^v[1-9][0-9]?\.(0|[1-9][0-9]?)\.0$'
+  non_priority_branch_re="${version_branch_re}|${targeted_branch_re}"
+
+  remote_branches="$(
+    git -C "$TARGET_DIR" for-each-ref --format='%(refname:short)' \
+      refs/remotes/origin | \
+      sed -n 's#^origin/##p' | \
+      grep -Ev '^(HEAD|main)$' | \
+      sort || true
+  )"
+
+  preferred_remote_branch="$(
+    printf '%s\n' "$remote_branches" | \
+      grep -E "$targeted_branch_re" | \
+      head -n 1 || true
+  )"
+
+  if [[ -z "$preferred_remote_branch" ]]; then
+    preferred_remote_branch="$(
+      printf '%s\n' "$remote_branches" | \
+        grep -Ev "$non_priority_branch_re" | \
+        head -n 1 || true
+    )"
+  fi
+
+  if [[ -z "$preferred_remote_branch" ]]; then
+    preferred_remote_branch="$(
+      printf '%s\n' "$remote_branches" | \
+        grep -E "$version_branch_re" | \
+        head -n 1 || true
+    )"
+  fi
+
+  if [[ "$current_branch" == "main" ]]; then
+    if [[ -n "$preferred_remote_branch" ]]; then
+      if ! git -C "$TARGET_DIR" switch -c "$preferred_remote_branch" \
+        --track "origin/$preferred_remote_branch" >/dev/null 2>&1; then
+        error_exit 4 "Failed to create local tracking branch" \
+                     "'$preferred_remote_branch' before removing local main"
+      fi
+      info "Switched to local branch '$preferred_remote_branch'"
+    else
+      if ! git -C "$TARGET_DIR" switch --detach origin/main \
+        >/dev/null 2>&1; then
+        error_exit 4 "Failed to detach to origin/main before removing local" \
+                     "main"
+      fi
+      warn "No targeted, contributor, or version branch found; repository" \
+           "is detached at origin/main"
+    fi
+  fi
+
+  if ! git -C "$TARGET_DIR" branch -D main >/dev/null 2>&1; then
+    error_exit 4 "Failed to remove local main branch from clone"
+  fi
+
+  success "Removed local 'main' from clone"
+fi
+
+info "Next steps:"
+echo "  cd $TARGET_DIR"
+echo "  mkbranch fix/your-branch main"
+
+exit 0

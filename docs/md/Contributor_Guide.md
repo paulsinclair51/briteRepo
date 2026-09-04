@@ -3,7 +3,7 @@
 #### Version: v1.0.0
 
 This guide explains how contributors, reviewers, and approvers prepare, test,
-review, and publish changes to the repository.
+review, and publish changes to the repository using briteRepo.
 
 #### Copyright (c) 2026 Paul Sinclair
 
@@ -100,9 +100,9 @@ commands handle the underlying Git and GitHub operations, policy checks,
 reporting, and recovery so contributors can work with branches, changes,
 reviews, and releases without managing low-level source-control details.
 
-Use the commands in `briteRepo/bin/` for repository-changing actions. After
-`setupclone`, they are normally available by name. You may also run them by
-path, such as `briteRepo/bin/commit`.
+Use the commands in `briterepo/bin/` for repository-changing actions. After
+[installing briteRepo](#14-installation), they are normally available by
+name. You may also run them by path, such as `briterepo/bin/commit`.
 
 | Task | Command |
 |------|---------|
@@ -133,15 +133,20 @@ and macOS, run them from a Bash-compatible terminal. On Windows, use WSL, Git
 Bash, or MSYS2. Native Command Prompt and PowerShell do not run these scripts
 directly, but they can launch a script through an installed `bash` executable.
 
-1. Create the clone with `mkclone`. It configures the commands and local
-   safeguards required by the workflow.
+briteRepo is installed once per user account, separately from any
+repository you use it to manage. If it is not already installed, see
+[Installation](#14-installation) in the Guide, then return here.
+
+1. Create the clone with `mkclone`. It clones the repository and
+   configures Git hook safeguards for it.
 2. Enter the new repository directory.
 3. Authenticate the GitHub CLI with `gh auth login`.
 4. Confirm that your GitHub login appears in `config/contributors.md`.
 5. Configure commit signing as described in
    [Signing Commits](#7-signing-commits).
 
-If you already have a clone, run `setupclone` to configure it.
+If you already have a clone whose Git hook safeguards are missing or were
+reset, run `fixlocal` to restore them.
 
 To create a repository that uses these commands, or to add the canonical
 layout to a repository you already own, run `mkrepo <repository>`.
@@ -486,11 +491,11 @@ protected files, large files, secrets, license headers, code quality, and
 workflow configuration. When a check fails, read its first actionable error,
 correct and test the problem locally, then run `commit` and `push`.
 
-`setupclone` installs local safeguards that route repository changes through
+`mkclone` installs local safeguards that route repository changes through
 project commands. These commands perform the required policy, permission, and
 safety checks.
 
-If local safeguards are missing, run `setupclone` to restore them.
+If local safeguards are missing, run `fixlocal` to restore them.
 </details>
 
 <details>
@@ -518,6 +523,24 @@ If local safeguards are missing, run `setupclone` to restore them.
   prints. Use `fixrepo` if the problem may affect more than the current clone.
   An approver or owner may use `fixremote` when a healthy clone must restore
   the remote repository; each repair command prints its own diagnostic report.
+- **A briteRepo clone's scripts aren't the ones on PATH (rare):** `mkclone`
+  gives a fresh briteRepo clone PATH priority over any installed copy by
+  adding a line marked `# briterepo-dev-clone` to `~/.bashrc`; `rmclone`
+  removes that line when the clone is removed. If this line is ever lost or
+  points at the wrong clone, fix it manually:
+
+  1. Remove any existing line containing `# briterepo-dev-clone` from `~/.bashrc`.
+  2. Add this line to `~/.bashrc` (replacing `/path/to/clone` with your actual clone path):
+     ```bash
+     export PATH="/path/to/clone/briterepo/bin:$PATH" # briterepo-dev-clone
+     ```
+  3. Reload the shell: `source ~/.bashrc`
+  4. Verify commands work: `lsbranch -a` or another briteRepo command.
+
+  Example: if your clone is at `/workspaces/briteRepo`:
+  ```bash
+  export PATH="/workspaces/briteRepo/briterepo/bin:$PATH" # briterepo-dev-clone
+  ```
 </details>
 
 <details>

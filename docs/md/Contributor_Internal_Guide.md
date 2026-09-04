@@ -4,7 +4,7 @@
 
 This document explains protected repository policy, repair decisions, and
 exceptional administrative procedures for maintainers, approvers, and repository
-owners. It is not part of the routine contributor workflow.
+owners. It is not part of the routine contributor briteRepo workflow.
 
 #### Copyright (c) 2026 Paul Sinclair
 
@@ -121,7 +121,9 @@ remote recovery steps when the local repository is clean and the issue remains.
 
 ## 3. Protected Branch and Ruleset Model
 
-The GitHub ruleset configuration is managed by `briteRepo/bin/setup_rulesets`.
+The GitHub ruleset configuration is managed by
+`briterepo/bin/helpers/setup_rulesets.sh`, which `fixlocal` now invokes
+automatically for repository owners with `gh` and `jq` installed.
 Protected branches are enforced at the server level for:
 
 - `main`
@@ -137,13 +139,14 @@ The ruleset model is intentionally conservative:
 This means that a contributor or owner cannot rely on local config to bypass
 repository protection. Only an actual GitHub-side admin authority can do that.
 
-`briteRepo/bin/mkrepo` commits and pushes the canonical layout directly to the
+`briterepo/bin/mkrepo` commits and pushes the canonical layout directly to the
 default branch, so it applies only to a repository whose default branch is not
 yet protected, such as one it has just created. It also installs the
 `.github/workflows/` validation workflows, which are repository content rather
-than clone configuration. Run `setup_rulesets` after the layout is in place,
-either separately or with `mkrepo --rulesets`; once the rulesets are active,
-further layout changes follow the normal branch and pull request workflow.
+than clone configuration. Run `bash briterepo/bin/helpers/setup_rulesets.sh`
+after the layout is in place, either separately or with `mkrepo --rulesets`;
+once the rulesets are active, further layout changes follow the normal branch
+and pull request workflow.
 </details>
 
 <details>
@@ -216,8 +219,8 @@ Prerequisites for `override`:
 - Do not add undocumented options to a user-facing command for command-to-command
   integration. Internal helper entry modes must validate the workflow state that
   authorizes their behavior.
-- Helpers in `briteRepo/helpers/` are never directly executable by a user. They
-  carry no executable bit and must be reachable only from `briteRepo/bin/`
+- Helpers in `briterepo/bin/helpers/` are never directly executable by a user. They
+  carry no executable bit and must be reachable only from `briterepo/bin/`
   commands or from other helpers. Sourced libraries abort when executed instead
   of sourced; delegated command implementations abort unless the caller supplies
   an entry-mode argument (`pushup_parent.sh`) or sets `BRITEREPO_INTERNAL=1`
