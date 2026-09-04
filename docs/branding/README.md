@@ -23,7 +23,7 @@ yellow fill, added black dot eye, and overlaid triangle for beak.
 background.
 
 **Logo_with_Tagline.svg**: monogram, brand name, and tagline
-"Catch it before it breaks." with transparent background.
+"Source Code Management made easy." with transparent background.
 
 **Monogram.svg**: Monogram-only `bT` with canary accent perched on T in a
 rounded-square.
@@ -38,7 +38,7 @@ None.
 
 ## Generation
 
-Use `<repo>/briteRepo/bin/genpngs` to regenerate the PNG files from the SVG sources.
+Use `<repo>/briterepo/bin/genpngs` to regenerate the PNG files from the SVG sources.
 
 Source-of-truth policy:
 
@@ -85,7 +85,7 @@ On 2026-06-20, the crest and cheek patch were removed by request. #FFF5B5
 removed from palette as it is no longer in use.
 
 On 2026-06-20, PNG exports were added for SVG variants.
-Use `briteRepo/bin/genpngs` to regenerate them from the SVG sources.
+Use `briterepo/bin/genpngs` to regenerate them from the SVG sources.
 
 On 2026-06-21, SVG and PNG files added for logo with document title.
 

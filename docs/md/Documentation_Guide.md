@@ -154,10 +154,10 @@ MAINTAINERS.md
 Makefile
 README.md               # Symbolic link to `<repo>/docs/md/Guide.md`,
 SECUTIRY.md
-briteRepo/              # Automation script assets.
+briterepo/              # Automation script assets.
     bin/                  # Scripts (e.g., gendocs, mkbranch).
-    helpers/              # Helper scripts for bin/briteRepo/`*.
-    tests/                # Test scripts for testing bin/briteRepo.
+        helpers/            # Shared shell helper modules used by bin/ scripts.
+    tests/                # Test scripts for testing bin/.
 build/                  # Build outputs and related artifacts.
 config/                 # Repository configuration files.
     contributors.md       # List of authorized contributors.

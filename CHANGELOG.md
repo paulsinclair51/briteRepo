@@ -3,7 +3,7 @@
 # Changelog
 
 For repository and branch history, generate a report by running
-`<repo>/briteRepo/bin/report` or simply `report` (if path is setup)
+`<repo>/briterepo/bin/report` or simply `report` (if path is setup)
 using the `repo` or `branch` argument. Reports are written to the
 `<repo>/reports/` directory. `report` using the `style` argument
 generates a report of style violations for the current branch.

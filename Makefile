@@ -74,52 +74,52 @@ lint-md:
 		xargs -0 npx -y markdownlint-cli --config config/markdownlint.json
 
 check-doc:
-	bash ./briteRepo/bin/report style -m -r
+	bash ./briterepo/bin/report style -m -r
 
 test-gendocs:
-	bash ./briteRepo/tests/test_gendocs.sh
+	bash ./briterepo/tests/test_gendocs.sh
 
 test-fixlocal:
-	bash ./briteRepo/tests/test_fixlocal.sh
+	bash ./briterepo/tests/test_fixlocal.sh
 
 test-fixremote:
-	bash ./briteRepo/tests/test_fixremote.sh
+	bash ./briterepo/tests/test_fixremote.sh
 
 test-lsbranch:
-	bash ./briteRepo/tests/test_lsbranch.sh
+	bash ./briterepo/tests/test_lsbranch.sh
 
 test-mkbranch:
-	bash ./briteRepo/tests/test_mkbranch.sh
+	bash ./briterepo/tests/test_mkbranch.sh
 
 test-pulldown:
-	bash ./briteRepo/tests/test_pulldown.sh
+	bash ./briterepo/tests/test_pulldown.sh
 
 test-pushup:
-	bash ./briteRepo/tests/test_pushup.sh
+	bash ./briterepo/tests/test_pushup.sh
 
 test-pushup-parent:
-	bash ./briteRepo/tests/test_pushup_parent.sh
+	bash ./briterepo/tests/test_pushup_parent.sh
 
 test-restore:
-	bash ./briteRepo/tests/test_restore.sh
+	bash ./briterepo/tests/test_restore.sh
 
 test-report-helpers:
-	bash ./briteRepo/tests/test_report_helpers.sh
+	bash ./briterepo/tests/test_report_helpers.sh
 
 test-report-style:
-	bash ./briteRepo/tests/test_report_style.sh
+	bash ./briterepo/tests/test_report_style.sh
 
 test-genpngs:
-	bash ./briteRepo/tests/test_genpngs.sh
+	bash ./briterepo/tests/test_genpngs.sh
 
 test-all-scripts:
-	bash ./briteRepo/tests/test_scripts.sh
+	bash ./briterepo/tests/test_scripts.sh
 
 gendocs:
-	bash ./briteRepo/bin/gendocs
+	bash ./briterepo/bin/gendocs
 
 genpngs:
-	bash ./briteRepo/bin/genpngs
+	bash ./briterepo/bin/genpngs
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)
