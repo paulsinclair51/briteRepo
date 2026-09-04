@@ -83,7 +83,9 @@ cp "$REPO_ROOT/briterepo/bin/helpers/common.sh" \
 chmod +x "$WORK/briterepo/bin/pushup"
 
 REAL_TIMEOUT="$(command -v timeout)"
+REAL_GIT="$(command -v git)"
 export REAL_TIMEOUT
+export REAL_GIT
 export PUSHUP_TEST_WORK="$WORK"
 mkdir -p "$TMPDIR/bin"
 cat > "$TMPDIR/bin/timeout" <<'EOF'
@@ -91,7 +93,18 @@ cat > "$TMPDIR/bin/timeout" <<'EOF'
 printf '%s\n' "$1" >> "$PUSHUP_TEST_WORK/.timeout-calls"
 exec "$REAL_TIMEOUT" "$@"
 EOF
+cat > "$TMPDIR/bin/git" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == switch && -f "$PUSHUP_TEST_WORK/.signal-on-git-switch" ]]; then
+    kill -TERM "$PPID"
+    exit 143
+  fi
+done
+exec "$REAL_GIT" "$@"
+EOF
 chmod +x "$TMPDIR/bin/timeout"
+chmod +x "$TMPDIR/bin/git"
 export PATH="$TMPDIR/bin:$PATH"
 
 printf 'base\n' > "$WORK/content.txt"
@@ -359,8 +372,11 @@ status="$(run_capture "$TMPDIR/network-reconnected.out" bash -c \
   "cd '$WORK' && ./briterepo/bin/pushup")"
 [[ "$status" -eq 4 ]] || \
   fail "nonpublication after reconnect should roll back with exit 4, got $status"
+[[ "$(git -C "$WORK" branch --show-current)" == main ]] || \
+  fail "rollback continuation should return to its starting branch"
 [[ ! -f "$WORK/.git/briteRepo/pushup.state" ]] || \
   fail "proven nonpublication should clear state after rollback"
+git -C "$WORK" checkout feature >/dev/null
 status="$(run_capture "$TMPDIR/network-restart.out" bash -c \
   "cd '$WORK' && ./briterepo/bin/pushup")"
 [[ "$status" -eq 0 ]] || fail "pushup should restart after rollback, got $status"
@@ -420,8 +436,8 @@ git -C "$WORK" checkout main >/dev/null
 status="$(run_capture "$TMPDIR/continue.out" bash -c \
   "cd '$WORK' && ./briterepo/bin/pushup")"
 [[ "$status" -eq 0 ]] || fail "continue should complete pushup, got $status"
-[[ "$(git -C "$WORK" branch --show-current)" == feature ]] || \
-  fail "continue should reselect the saved source branch"
+[[ "$(git -C "$WORK" branch --show-current)" == main ]] || \
+  fail "continue should return to its starting branch"
 [[ ! -f "$WORK/.git/briteRepo/pushup.state" ]] || \
   fail "completed pushup should remove state"
 [[ "$(git --git-dir="$ORIGIN" rev-parse main)" == "$(git -C "$WORK" rev-parse main)" ]] || \
@@ -523,17 +539,16 @@ write_state parent-published \
   "$(git -C "$WORK" rev-parse feature)" \
   "$(git -C "$WORK" rev-parse main)" \
   "$(git -C "$WORK" rev-parse main)"
-cat > "$WORK/briterepo/bin/chbranch" <<'EOF'
-#!/usr/bin/env bash
-kill -TERM "$PPID"
-exit 143
-EOF
-chmod +x "$WORK/briterepo/bin/chbranch"
+git -C "$WORK" checkout main >/dev/null
+touch "$WORK/.signal-on-git-switch"
 status="$(run_capture "$TMPDIR/signal.out" bash -c \
   "cd '$WORK' && ./briterepo/bin/pushup")"
 [[ "$status" -eq 5 ]] || fail "signal interruption should exit 5, got $status"
+[[ "$(git -C "$WORK" branch --show-current)" == main ]] || \
+  fail "signal interruption should return to its starting branch"
 [[ -f "$WORK/.git/briteRepo/pushup.state" ]] || fail "signal should retain state"
 assert_contains "Rerun pushup" "$TMPDIR/signal.out"
+rm -f "$WORK/.signal-on-git-switch"
 cat > "$WORK/briterepo/bin/chbranch" <<'EOF'
 #!/usr/bin/env bash
 git checkout "${@: -1}" >/dev/null
@@ -552,4 +567,6 @@ rm -rf "$WORK/.git/briteRepo/pushup-tools"
 status="$(run_capture "$TMPDIR/signal-continue.out" bash -c \
   "cd '$WORK' && ./briterepo/bin/pushup")"
 [[ "$status" -eq 0 ]] || fail "continuation after signal should complete, got $status"
+[[ "$(git -C "$WORK" branch --show-current)" == main ]] || \
+  fail "continuation after signal should return to its starting branch"
 echo "PASS: signal interruption retains state and resumes"
