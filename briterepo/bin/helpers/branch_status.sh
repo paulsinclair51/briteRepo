@@ -61,6 +61,14 @@ bt_branch_status_init() {
   declare -gA PR_COUNTS_BY_BRANCH=()
   BASE_REF_CANDIDATES=""
   BASE_REF_CANDIDATES_LOADED=false
+  BRANCH_EXISTENCE_LOADED=false
+  declare -gA LOCAL_BRANCH_SET=()
+  declare -gA REMOTE_BRANCH_SET=()
+
+  if ! SCRATCH_DIR="$(mktemp -d)"; then
+    bt_emit_error "Failed to create temporary directory for command output."
+    exit "$EXIT_RUNTIME_ERROR"
+  fi
 
   if ! WARNINGS_FILE="$(mktemp)"; then
     bt_emit_error "Failed to create temporary file for warnings."
@@ -72,20 +80,45 @@ cleanup_runtime_files() {
   # shellcheck disable=SC2317  # Invoked by trap cleanup_runtime_files EXIT.
   # Suppress errors during cleanup to ensure trap always completes
   rm -f "$WARNINGS_FILE" 2>/dev/null || true
+  rm -rf "$SCRATCH_DIR" 2>/dev/null || true
   if [[ -n "$REPORT_LOCK_FD" ]]; then
     bt_report_release_lock "$REPORT_LOCK_FD"
     REPORT_LOCK_FD=""
   fi
 }
 
+# Ref existence is stable for a run, so read all refs once.
+load_branch_existence() {
+  local ref=""
+
+  BRANCH_EXISTENCE_LOADED=true
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    LOCAL_BRANCH_SET["$ref"]=1
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    [[ "$ref" == "origin/HEAD" ]] && continue
+    REMOTE_BRANCH_SET["${ref#origin/}"]=1
+  done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin)
+}
+
 # Branch existence checks
 has_local_branch() {
   local branch="$1"
+  if [[ "$BRANCH_EXISTENCE_LOADED" == true ]]; then
+    [[ -n "${LOCAL_BRANCH_SET["$branch"]:-}" ]]
+    return
+  fi
   git show-ref --verify --quiet "refs/heads/$branch"
 }
 
 has_remote_branch() {
   local branch="$1"
+  if [[ "$BRANCH_EXISTENCE_LOADED" == true ]]; then
+    [[ -n "${REMOTE_BRANCH_SET["$branch"]:-}" ]]
+    return
+  fi
   git show-ref --verify --quiet "refs/remotes/origin/$branch"
 }
 
@@ -140,22 +173,10 @@ capture_command_output() {
   local stderr_var="$2"
   shift 2
 
-  local stdout_file
-  local stderr_file
+  # Scratch paths are per-shell so subshell captures cannot collide.
+  local stdout_file="$SCRATCH_DIR/capture-$BASHPID.out"
+  local stderr_file="$SCRATCH_DIR/capture-$BASHPID.err"
   local rc
-  
-  # Create temporary files for captured output
-  if ! stdout_file=$(mktemp); then
-    printf -v "$stdout_var" '%s' ""
-    printf -v "$stderr_var" '%s' "mktemp failed for stdout"
-    return 1
-  fi
-  if ! stderr_file=$(mktemp); then
-    rm -f "$stdout_file"
-    printf -v "$stdout_var" '%s' ""
-    printf -v "$stderr_var" '%s' "mktemp failed for stderr"
-    return 1
-  fi
 
   # Execute command and capture output; preserve exit code
   set +e
@@ -167,8 +188,6 @@ capture_command_output() {
   printf -v "$stdout_var" '%s' "$(<"$stdout_file")"
   printf -v "$stderr_var" '%s' "$(<"$stderr_file")"
 
-  # Clean up temporary files
-  rm -f "$stdout_file" "$stderr_file" || true
   return "$rc"
 }
 
@@ -1420,6 +1439,7 @@ fi
 if [[ -n "$BRANCHES_TO_CHECK" || -n "$REMOTE_BRANCHES_TO_CHECK" ]]; then
   load_pending_pr_counts
   load_base_ref_candidates
+  load_branch_existence
 fi
 
 # No-argument invocation shows local and remote rows for the current branch
