@@ -200,18 +200,29 @@ If a script is not executable in your environment, you can:
 
 ### Scripts not in PATH
 
-1. Rerun `<repo>/briterepo/bin/install` (see Getting Started above).
+The recommended approach is to use `mkclone` when cloning briteRepo, which
+automatically sets up PATH. If scripts are not in PATH:
 
-2. Manually update the PATH configuration:
+1. **If you haven't cloned yet:** use `mkclone` to create a briteRepo clone.
+   It will automatically configure PATH.
 
-   - Add this line to ~/.bashrc:
+2. **If PATH was lost or needs manual fixing:**
 
-      ```sh
-      export PATH="`<repo>/briterepo/bin`:$PATH"
-      ```
-
-   - Then reload your shell configuration:
+   - Remove any existing line containing `# briterepo-dev-clone` from `~/.bashrc`.
+   - Add this line to `~/.bashrc` (replacing `/path/to/clone` with your actual
+     clone path):
 
      ```sh
-     source ~/.bashrc
+     export PATH="/path/to/clone/briterepo/bin:$PATH" # briterepo-dev-clone
      ```
+
+   - Reload your shell: `source ~/.bashrc`
+   - Verify with: `lsbranch -h`
+
+   **Example:** if your clone is at `/workspaces/briteRepo`:
+   ```sh
+   export PATH="/workspaces/briteRepo/briterepo/bin:$PATH" # briterepo-dev-clone
+   ```
+
+For detailed troubleshooting, see the Contributor Guide's
+[Troubleshooting section](../../docs/md/Contributor_Guide.md#101-common-problems).
