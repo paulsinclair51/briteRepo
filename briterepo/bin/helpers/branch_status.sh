@@ -55,6 +55,12 @@ bt_branch_status_init() {
   FETCH_FAILED=false
   INITIAL_STATUS_PORCELAIN=""
   CURRENT_IS_REMOTE_SNAPSHOT=false
+  PR_COUNTS_LOADED=false
+  PR_LOOKUP_STATUS=""
+  PR_LOOKUP_ERROR=""
+  declare -gA PR_COUNTS_BY_BRANCH=()
+  BASE_REF_CANDIDATES=""
+  BASE_REF_CANDIDATES_LOADED=false
 
   if ! WARNINGS_FILE="$(mktemp)"; then
     bt_emit_error "Failed to create temporary file for warnings."
@@ -359,41 +365,60 @@ get_behind_count() {
   printf '%s\n' "$rev_list_output"
 }
 
-get_pending_pr_count() {
-  local branch="$1"
+# One bulk PR query per run; per-branch counts are served from the cache.
+load_pending_pr_counts() {
   local pr_output=""
   local pr_error=""
-  local pr_count
+  local head_ref=""
+
+  PR_COUNTS_LOADED=true
 
   if ! command -v gh >/dev/null 2>&1; then
-    record_diagnostic \
-      "PR lookup unavailable for '$branch'; PR column shown as N/A." \
-      "gh CLI not found"
-    echo "N/A"
+    PR_LOOKUP_STATUS="unavailable"
+    PR_LOOKUP_ERROR="gh CLI not found"
     return 0
   fi
 
   if ! capture_command_output \
     pr_output pr_error \
-    bt_run_remote_command gh pr list --head "$branch" --state open \
-      --json number --jq 'length'; then
-    record_diagnostic \
-      "Failed to query pull requests for '$branch'; PR column shown as N/A." \
-      "$pr_error"
-    echo "N/A"
+    bt_run_remote_command gh pr list --state open --limit 1000 \
+      --json headRefName --jq '.[].headRefName'; then
+    PR_LOOKUP_STATUS="failed"
+    PR_LOOKUP_ERROR="$pr_error"
     return 0
   fi
 
-  pr_count="$pr_output"
+  PR_LOOKUP_STATUS="ok"
+  while IFS= read -r head_ref; do
+    [[ -n "$head_ref" ]] || continue
+    PR_COUNTS_BY_BRANCH["$head_ref"]=$(( \
+      ${PR_COUNTS_BY_BRANCH["$head_ref"]:-0} + 1 ))
+  done <<< "$pr_output"
+}
 
-  if [[ "$pr_count" =~ ^[0-9]+$ ]]; then
-    echo "$pr_count"
-  else
-    record_diagnostic \
-      "Unexpected PR lookup output for '$branch'; PR column shown as N/A." \
-      "$pr_count"
-    echo "N/A"
-  fi
+get_pending_pr_count() {
+  local branch="$1"
+
+  [[ "$PR_COUNTS_LOADED" == true ]] || load_pending_pr_counts
+
+  case "$PR_LOOKUP_STATUS" in
+    unavailable)
+      record_diagnostic \
+        "PR lookup unavailable for '$branch'; PR column shown as N/A." \
+        "$PR_LOOKUP_ERROR"
+      echo "N/A"
+      return 0
+      ;;
+    failed)
+      record_diagnostic \
+        "Failed to query pull requests for '$branch'; PR column shown as N/A." \
+        "$PR_LOOKUP_ERROR"
+      echo "N/A"
+      return 0
+      ;;
+  esac
+
+  echo "${PR_COUNTS_BY_BRANCH["$branch"]:-0}"
 }
 
 ensure_remote_refs_fetched() {
@@ -478,6 +503,25 @@ build_report_command() {
   fi
 }
 
+# Candidate refs are stable for a run, so enumerate them once.
+load_base_ref_candidates() {
+  local ref=""
+  local candidates=""
+
+  BASE_REF_CANDIDATES_LOADED=true
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    [[ "$ref" == r-* ]] && continue
+    candidates+="$ref"$'\n'
+  done < <(
+    {
+      git for-each-ref --format='%(refname:short)' refs/heads
+      git for-each-ref --format='%(refname:short)' refs/remotes/origin
+    } | sort -u
+  )
+  BASE_REF_CANDIDATES="$candidates"
+}
+
 get_branch_base_reference() {
   local branch="$1"
   local branch_ref="$branch"
@@ -524,6 +568,8 @@ get_branch_base_reference() {
     return 0
   fi
 
+  [[ "$BASE_REF_CANDIDATES_LOADED" == true ]] || load_base_ref_candidates
+
   local best_base=""
   local best_distance=""
   local ref
@@ -565,15 +611,7 @@ get_branch_base_reference() {
       best_distance="$distance"
       best_base="$candidate_display"
     fi
-  done < <(
-    {
-      git for-each-ref --format='%(refname:short)' refs/heads
-      git for-each-ref --format='%(refname:short)' refs/remotes/origin
-    } | while IFS= read -r ref; do
-      [[ "$ref" == r-* ]] && continue
-      printf '%s\n' "$ref"
-    done | sort -u
-  )
+  done <<< "$BASE_REF_CANDIDATES"
 
   if [[ -z "$best_base" ]]; then
     record_diagnostic \
@@ -1375,6 +1413,13 @@ if [[ "$FETCH_FAILED" == true ]] &&
     bt_warn "$(printf '%s%s' \
       "Cannot connect to remote repository. Branch status uses cached " \
       "refs from your last successful remote update.")"
+fi
+
+# Per-branch lookups run inside command substitution, so their caches cannot
+# persist from a subshell. Prime them here instead.
+if [[ -n "$BRANCHES_TO_CHECK" || -n "$REMOTE_BRANCHES_TO_CHECK" ]]; then
+  load_pending_pr_counts
+  load_base_ref_candidates
 fi
 
 # No-argument invocation shows local and remote rows for the current branch
