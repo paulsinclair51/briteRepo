@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GIT_HELPER="$REPO_ROOT/briterepo/bin/helpers/git_helpers.sh"
 PRE_COMMIT_HOOK="$REPO_ROOT/briterepo/bin/helpers/.githooks/pre-commit"
 PRE_PUSH_HOOK="$REPO_ROOT/briterepo/bin/helpers/.githooks/pre-push"
-RULESET_SCRIPT="$REPO_ROOT/briterepo/bin/setup_rulesets"
+RULESET_SCRIPT="$REPO_ROOT/briterepo/bin/helpers/setup_rulesets.sh"
 
 pass() {
   echo "PASS: $1"

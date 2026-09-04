@@ -48,7 +48,8 @@ None.
 - Configures Git to use `.githooks/` through `core.hooksPath`.
 - Makes hooks executable.
 - Idempotent (safe to run multiple times).
-- Called automatically by `setupclone` and `mkclone`.
+- Called automatically by `mkclone` and by `fixlocal` (to repair a
+  misconfigured clone).
 
 ## How Git Hooks Work
 
@@ -100,17 +101,14 @@ For more information, see docs/GIT_HOOKS_WORKFLOW.md
 
 ### Automatic (Recommended)
 
-Hooks install automatically when you:
+Hooks install automatically when you clone with `mkclone`:
 
-1. **Clone with `mkclone`:**
-   ```bash
-   mkclone
-   ```
+```bash
+mkclone
+```
 
-2. **Run `setupclone`:**
-   ```bash
-   bash briterepo/bin/setupclone
-   ```
+If hooks are ever reset or misconfigured on an existing clone, `fixlocal`
+detects and repairs this automatically.
 
 ### Manual Installation
 

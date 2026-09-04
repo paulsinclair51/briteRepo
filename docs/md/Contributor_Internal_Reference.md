@@ -246,7 +246,8 @@ restore the protection immediately.
   it never deletes existing content outside the `briterepo/` script
   directories and `.github/workflows/`, which it replaces with a fresh copy.
   Server-side enforcement is only complete once those workflows are present
-  and `setup_rulesets` has been run for the repository.
+  and `setup_rulesets.sh` (in `briterepo/bin/helpers/`) has been run for the
+  repository.
 
 This document records the explicit limitations of the owner override and the
 server-side administrative authority required for protected remote repair.

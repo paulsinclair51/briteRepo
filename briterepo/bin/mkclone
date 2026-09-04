@@ -29,6 +29,9 @@ This script:
     required). Git hooks protect against accidental direct git commands.
   - Does not install or PATH scripts; that is a one-time, per-user step
     (see the Guide's Installation section), not repeated for each clone.
+  - Allows only one clone of the briteRepo repository itself per user on
+    this machine, since cloning it also switches PATH to that clone's
+    scripts; remove the existing one with rmclone before cloning another.
 
 Arguments:
   [DIRECTORY]        Optional target directory name
@@ -62,13 +65,14 @@ Outputs:
   - Writes errors and diagnostics to stderr.
 
 Exit codes:
-  0   Success
-  1   Argument error
-  2   Git clone failed
-  3   Target directory already exists
-  4   Failed to configure Git hooks
+  0   Success.
+  1   Argument error.
+  2   Git clone failed.
+  3   Target directory already exists.
+  4   Failed to configure Git hooks.
   5   Missing required tools (git, bash), or no repository could be
-      determined
+      determined.
+  6   Another briteRepo clone already exists on this machine for the user.
 EOF
 }
 
@@ -98,9 +102,14 @@ bt_emit_error() {
 }
 
 # Shared helpers
-if [[ -f "$COMMON_HELPER" ]]; then
-  # shellcheck source=helpers/common.sh disable=SC1091
-  source "$COMMON_HELPER" 2>/dev/null || true
+if [[ ! -f "$COMMON_HELPER" ]]; then
+  bt_emit_error "Required helper not found: $COMMON_HELPER"
+  exit 5
+fi
+# shellcheck source=helpers/common.sh disable=SC1091
+if ! source "$COMMON_HELPER"; then
+  bt_emit_error "Failed to load helper: $COMMON_HELPER"
+  exit 5
 fi
 if [[ ! -f "$HISTORY_HELPER" ]]; then
   bt_emit_error "Required helper not found: $HISTORY_HELPER"
@@ -257,6 +266,19 @@ if [[ -e "$TARGET_DIR" ]]; then
   error_exit 3 "Target directory '$TARGET_DIR' already exists"
 fi
 
+# Only one clone of briteRepo itself is allowed per user on this machine:
+# cloning it switches PATH to that clone's scripts (see mkclone -h), so a
+# second one would make script resolution ambiguous.
+if [[ "${REPO_NAME,,}" == "briterepo" ]]; then
+  existing_dev_bin="$(bt_dev_clone_bin_path || true)"
+  if [[ -n "$existing_dev_bin" ]]; then
+    existing_dev_clone="${existing_dev_bin%/briterepo/bin}"
+    if [[ -d "$existing_dev_clone" ]]; then
+      error_exit 6 "A briteRepo clone already exists at $existing_dev_clone. Remove it with rmclone before cloning another."
+    fi
+  fi
+fi
+
 # Check requirements before starting
 check_requirements
 
@@ -272,32 +294,31 @@ success "Repository cloned successfully"
 info "Repository: $REPO_URL"
 info "Cloned to: ./$TARGET_DIR"
 
-# Configure Git hooks for the new clone. When the clone is briteRepo
-# itself, run its own setupclone instead, which also prepends the clone
-# to PATH ahead of any installed copy (see setupclone -h). Scripts are
-# otherwise not installed or PATH-configured per clone; that is a
-# one-time, per-user step (see the Guide's Installation section),
-# already done wherever this command itself came from.
+# Configure Git hooks for the new clone, using this script's own bundled
+# .githooks (hooks come from wherever the running tooling lives, shared
+# across all repos, not a per-repo vendored copy; see install_git_hooks.sh).
 info "Configuring Git hooks..."
-clone_setupclone="$TARGET_DIR/briterepo/bin/setupclone"
-if [[ "${REPO_NAME,,}" == "briterepo" && -f "$clone_setupclone" ]]; then
-  if (cd "$TARGET_DIR" && bash briterepo/bin/setupclone); then
-    success "Git hooks configured"
-  else
-    warn "Warning: Failed to configure Git hooks"
-    info "You can configure them manually by running:"
-    info "  cd $TARGET_DIR && bash briterepo/bin/setupclone"
-  fi
+hook_installer="$SCRIPT_DIR/helpers/install_git_hooks.sh"
+if [[ -f "$hook_installer" ]] && \
+  (cd "$TARGET_DIR" && bash "$hook_installer" --silent) >/dev/null 2>&1; then
+  success "Git hooks configured successfully"
 else
-  hook_installer="$SCRIPT_DIR/helpers/install_git_hooks.sh"
-  if [[ -f "$hook_installer" ]] && \
-    (cd "$TARGET_DIR" && bash "$hook_installer" --silent) >/dev/null 2>&1; then
-    success "Git hooks configured successfully"
+  warn "Warning: Failed to configure Git hooks"
+  info "You can configure them manually by running:"
+  info "  cd $TARGET_DIR"
+  info "  bash $hook_installer"
+fi
+
+# When the clone is briteRepo itself, also prepend it to PATH ahead of any
+# installed copy, so local script changes take effect immediately (undone
+# by rmclone when that clone is removed; see rmclone -h).
+if [[ "${REPO_NAME,,}" == "briterepo" ]]; then
+  clone_bin_dir="$(cd "$TARGET_DIR" && pwd)/briterepo/bin"
+  if bt_set_dev_clone_path "$clone_bin_dir"; then
+    success "PATH updated to use this clone's scripts"
   else
-    warn "Warning: Failed to configure Git hooks"
-    info "You can configure them manually by running:"
-    info "  cd $TARGET_DIR"
-    info "  bash $hook_installer"
+    warn "Warning: Failed to update PATH for this clone"
+    info "See the Contributor Guide for how to set this manually."
   fi
 fi
 

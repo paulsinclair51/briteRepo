@@ -70,7 +70,6 @@ readonly UTILITY_SCRIPTS=(
   "gendocs"            # Generate documentation
   "genpngs"            # Generate PNG files
   "report"           # Generate workflow reports
-  "setupclone"         # Setup clone environment
 )
 
 # Protected scripts (require approver override confirmation)

@@ -532,15 +532,14 @@ emit_followup_items() {
   fi
 
   if [[ "$APPLY_RULESETS" != true ]]; then
-    printf -- '- Protect `main` and the version branches with\n'
-    printf -- '  `setup_rulesets %s`. Run it after this layout is in\n' \
-      "$TARGET_SLUG"
-    printf -- '  place, because the rulesets block direct pushes.\n'
+    printf -- '- Protect `main` and the version branches with rulesets:\n'
+    printf -- '  have the repository owner run `fixlocal` after this layout\n'
+    printf -- '  is in place, because the rulesets block direct pushes.\n'
   fi
 
   printf -- '- Install briteRepo (once per user account; see its Guide), then\n'
-  printf -- '  clone the repository with `mkclone` and run `setupclone` in\n'
-  printf -- '  every clone to activate Git hook safeguards.\n'
+  printf -- '  clone the repository with `mkclone`, which activates Git hook\n'
+  printf -- '  safeguards automatically.\n'
   printf -- '- Configure commit signing for each contributor; the workflows\n'
   printf -- '  in `.github/workflows/` validate signatures on push.\n'
   printf -- '- Add the repository content: sources in `src/`, headers in\n'
@@ -632,9 +631,10 @@ emit_error_guidance() {
       printf -- '- Confirm the GitHub CLI is authenticated with\n'
       printf -- '  `gh auth status`, and that the account may create\n'
       printf -- '  repositories and administer `%s`.\n' "$TARGET_SLUG"
-      printf -- '- If `setup_rulesets` failed, the layout was pushed. Rerun\n'
-      printf -- '  `setup_rulesets %s` once the permission is in place.\n' \
-        "$TARGET_SLUG"
+      printf -- '- If ruleset application failed, the layout was pushed.\n'
+      printf -- '  Once repository administration permission is in place,\n'
+      printf -- '  have the repository owner run `fixlocal` in a clone of\n'
+      printf -- '  `%s` to apply rulesets.\n' "$TARGET_SLUG"
       ;;
     *)
       printf -- '- Rerun with `-d` to review the planned changes without\n'
@@ -1022,12 +1022,12 @@ Describe the purpose of this repository here.
 ## Getting Started
 
 Install briteRepo (once per user account; see its Guide's Installation
-section), then clone this repository and activate Git hook safeguards:
+section), then clone this repository (Git hook safeguards are activated
+automatically):
 
 \`\`\`sh
 mkclone -r $TARGET_SLUG
 cd $REPO_NAME
-setupclone
 \`\`\`
 
 See \`<repo>/docs/md/Contributor_Guide.md\` for the contributor workflow.
@@ -1326,7 +1326,7 @@ verify_push() {
 }
 
 apply_rulesets() {
-  local rulesets_script="$SCRIPT_DIR/setup_rulesets"
+  local rulesets_script="$SCRIPT_DIR/helpers/setup_rulesets.sh"
 
   [[ "$APPLY_RULESETS" == true ]] || return 0
 
@@ -1334,11 +1334,11 @@ apply_rulesets() {
   echo "Applying repository rulesets..."
   if [[ ! -f "$rulesets_script" ]]; then
     error_exit "$EXIT_GITHUB_ERROR" \
-      "setup_rulesets not found alongside mkrepo at $rulesets_script"
+      "setup_rulesets helper not found alongside mkrepo at $rulesets_script"
   fi
   if ! run_remote bash "$rulesets_script" "$TARGET_SLUG"; then
     local ruleset_error="Canonical layout was pushed, but setup_rulesets "
-    ruleset_error+="failed for $TARGET_SLUG. Rerun: setup_rulesets "
+    ruleset_error+="failed for $TARGET_SLUG. Rerun: bash $rulesets_script "
     ruleset_error+="$TARGET_SLUG"
     error_exit "$EXIT_GITHUB_ERROR" "$ruleset_error"
   fi
@@ -1348,12 +1348,11 @@ apply_rulesets() {
 print_next_steps() {
   echo ""
   echo "Next steps:"
-  echo "  mkclone -r $TARGET_SLUG"
+  echo "  mkclone -r $TARGET_SLUG   # activates Git hook safeguards automatically"
   echo "  cd $REPO_NAME"
-  echo "  setupclone   # activate Git hook safeguards (briteRepo must be installed; see the Guide)"
   echo "  Add contributor logins and roles to config/contributors.md"
   if [[ "$APPLY_RULESETS" != true ]]; then
-    echo "  setup_rulesets $TARGET_SLUG   # protect main and version branches"
+    echo "  Have the repository owner run fixlocal to apply branch protection rulesets"
   fi
   echo "  See the report above for the full follow-up list"
 }

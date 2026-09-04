@@ -33,9 +33,11 @@ library it sources owns the work and reports failures back through exit codes.
 that must not inherit a library's function definitions call the library from a
 subshell.
 
-`install_git_hooks.sh` is the one documented exception: it is a setup utility
-invoked by `briterepo/bin/setupclone` and by the `post-checkout` hook, and it
-may be run directly during clone repair.
+`install_git_hooks.sh` is one documented exception: it is a setup utility
+invoked by `mkclone`, `fixlocal`, and the `post-checkout` hook, and it may be
+run directly during clone repair. `setup_rulesets.sh` is another: it is
+invoked by `fixlocal` (and by `mkrepo` with `--rulesets`), and may also be
+run directly.
 
 ## Files
 
@@ -88,6 +90,10 @@ validate policy and prepare the local parent commit before publication.
 **report_helpers.sh**: report geneation helpers.
 
 **report_sync.sh**: sync reports.
+
+**setup_rulesets.sh**: Create, update, or verify GitHub repository rulesets.
+Invoked by `fixlocal` and by `mkrepo` with `--rulesets`; can also be run
+directly. Repository owner and GitHub administration access are required.
 
 **validation_helpers.sh**: validation helpers.
 

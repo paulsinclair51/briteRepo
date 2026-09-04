@@ -14,7 +14,7 @@ See `<repo>/README.md` for an introduction to the repository.
 
 ## Subdirectories
 
-**bin/**: Contributor command scripts, including `setup_rulesets`, and
+**bin/**: Contributor command scripts, and
 `bin/helpers/`, the shared shell helper modules the scripts source.
 
 **tests/**: Script tests.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# rmclone - Remove contents of a local clone directory.
+# rmclone - Remove a local clone directory.
 #
 # See usage below for details, or run: rmclone -h
 #
@@ -14,40 +14,49 @@ Usage:
   rmclone [OPTIONS] <clone-path>
   rmclone {-h | --help}
 
-Removing the contents of a local clone directory is a destructive operation
-that permanently deletes contents in the target directory (clone path).
-This command requires confirmation from the user. The command follows these steps:
+Removing a local clone directory is a destructive operation that
+permanently deletes the target directory (clone path) and its contents.
+If all prerequisites are met, this command still requires confirmation
+from the user before removing anything. The command follows these
+steps:
   - Validates the arguments and options.
   - Validates prerequisites.
-  - Output any warnings (uncommitted changes, stashes, remote was not
-    not reachable within the timeout, local is behind or differs from
-    its remote, the removal of the clone cannot be recorded in the remote,
-    etc.) to stdout. The user should review these warnings carefully
-    before proceeding.
-  - Prompts to stdout for confirmation to remove the contents of the
-    clone directory or to cancel the operation. The prompt specifies
-    the valid responses (remove, q, quit, exit, control-c).
-  - An invalid response causes the prompt to be re-displayed to stdout.
-  - If confirmed to remove, the removal is executed and, if the
-    remote is reachable, a record of success or failure of the removal
-    is recorded on the remote.
+  - Outputs any warnings (uncommitted changes, stash entries, local-only
+    commits not on any remote, or a configured remote that is not
+    reachable within the timeout) to stdout. These warnings do not
+    prevent removal; the user should review them carefully before
+    confirming.
+  - Prompts to stdout for confirmation to remove the clone directory
+    or to cancel the operation. The prompt specifies
+    the valid case-insensitive responses (remove, cancel), or
+    enter control-c. End of file (EOF) is also accepted.
+  - An invalid response causes the prompt to be re-displayed to stdout for
+    up to 3 attempts to enter a valid response.
+  - If confirmed by entering 'remove', a best-effort note documenting the
+    removal (including any warnings listed above) is recorded on the
+    clone's remote main branch (if reachable), and the clone directory
+    is then removed. Otherwise, the clone is not removed.
+  - Resets the path to scripts as needed.
 
 Prerequisites:
-  - User must be a contributor, reviewer, or approver.
+  - User must be a contributor, reviewer, or approver for the clone, or
+    the clone's own local Git identity (user.email) must match the
+    user's, even without a current role for the clone.
   - Clone-path exists and is accessible by the user.
   - Clone-path is a Git repository clone.
-  - The current working directory is not a subdirectory of the clone
-    directory.
+  - Clone-path is not the root directory (/).
+  - The current working directory is not the clone directory or a
+    subdirectory of it. cd elsewhere before running this command.
 
 Arguments:
-  <clone-path>  Path to the clone directory to remove its contents.
+  <clone-path>  Path to the clone directory to remove.
 
 Options:
   -h, --help  Output this help to stdout and exit (other options and
               arguments are ignored).
   -d          Dry-run. Validate argument, options, and prerequisites
               and displays any warnings but does not prompt for confirmation
-              or remove the contents of the clone directory.
+              or remove the clone directory.
   -t SEC      Remote operation timeout in seconds (default: 10).
               SEC must be an integer greater than 0.
 
@@ -69,23 +78,43 @@ EOF
 }
 
 # High-Level Flow:
-# - Validates target path and Git repository state.
-# - Performs non-destructive safety checks to avoid data loss.
-# - Requires explicit confirmation unless override is used.
-# - Supports dry-run mode to preview actions.
-# - Removes clone directory with rm -rf only after checks/confirmation.
+# - Parse options and the target clone-path argument.
+# - Require authorization: a contributor+ role for the clone, or a local
+#   Git identity (user.email) matching the clone's own.
+# - Enforce hard prerequisites: not the current working directory, and
+#   not the root directory (/). If the target is this script's own
+#   repository, relocate to a temporary copy and continue from there
+#   instead of refusing (see relocate_and_reexec_self).
+# - Run non-destructive git-state checks (uncommitted changes, stashes,
+#   local-only commits, remote reachability) and report any as warnings;
+#   these never block removal on their own.
+# - Dry-run mode stops here and reports what would happen.
+# - Prompt for confirmation (up to 3 attempts; EOF cancels).
+# - Record a best-effort removal note on the clone's remote main branch
+#   while the clone still exists, then remove it with rm -rf.
+# - Verify the removal, then remove any dev-clone PATH override in
+#   ~/.bashrc that pointed at this clone (set by mkclone; see mkclone -h).
 
 # shellcheck disable=SC1091  # Helper source paths are resolved at runtime.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ---------------------------------------------------------------------------
+# Constants and shared helpers
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
-REPO_NAME="$(basename "$REPO_ROOT")"
 COMMON_HELPER="$SCRIPT_DIR/helpers/common.sh"
 
+readonly EXIT_INVALID_ARGUMENT=1
+readonly EXIT_PREREQUISITE_FAILED=2
+readonly EXIT_CANCELLED=3
+readonly EXIT_REMOVAL_FAILED=200
+
+# Plain echo here: bt_emit_error is not available until common.sh loads.
 if [[ ! -f "$COMMON_HELPER" ]]; then
-  bt_emit_error "Required helper not found: $COMMON_HELPER"
+  echo "Error: Required helper not found: $COMMON_HELPER" >&2
   exit "$EXIT_INVALID_ARGUMENT"
 fi
 
@@ -96,10 +125,15 @@ source "$SCRIPT_DIR/helpers/history_log.sh"
 # shellcheck source=helpers/git_helpers.sh
 source "$SCRIPT_DIR/helpers/git_helpers.sh"
 
-readonly EXIT_INVALID_ARGUMENT=1
-readonly EXIT_NOT_FOUND=2
-readonly EXIT_OPERATION_FAILED=3
-readonly EXIT_CONFIG_ERROR=4
+# If this process is a temporary self-copy made by relocate_and_reexec_self,
+# clean up exactly the directory it created (passed explicitly via
+# RMCLONE_SELF_TEMP_DIR, never re-derived from SCRIPT_DIR/REPO_ROOT) once
+# this process exits, on any code path. The sentinel-file check guards
+# against ever acting on an unexpected or empty path.
+if [[ -n "${RMCLONE_RELOCATED:-}" && -n "${RMCLONE_SELF_TEMP_DIR:-}" && \
+  -f "$RMCLONE_SELF_TEMP_DIR/.rmclone-self-copy" ]]; then
+  trap 'rm -rf -- "$RMCLONE_SELF_TEMP_DIR"' EXIT
+fi
 
 usage_error() {
   local message="$1"
@@ -109,8 +143,11 @@ usage_error() {
   exit "$EXIT_INVALID_ARGUMENT"
 }
 
+# ---------------------------------------------------------------------------
+# Run state
+# ---------------------------------------------------------------------------
+
 DRY_RUN=false
-OVERRIDE=false
 TARGET_INPUT=""
 TARGET_ABS=""
 ISSUES=()
@@ -120,6 +157,10 @@ add_issue() {
   ISSUES+=("$1")
 }
 
+# ---------------------------------------------------------------------------
+# Remote workflow logging
+# ---------------------------------------------------------------------------
+
 record_removal_note_on_remote_main() {
   local target_path="$1"
   local target_ref=""
@@ -128,18 +169,31 @@ record_removal_note_on_remote_main() {
   local timestamp=""
   local user_name=""
   local user_email=""
+  local warnings="none"
 
-  if git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+  # Must run against the clone itself (-C) and before it is removed:
+  # this is the only point where its remote and notes ref are reachable.
+  if git -C "$target_path" rev-parse --verify refs/remotes/origin/main \
+    >/dev/null 2>&1; then
     target_ref="refs/remotes/origin/main"
-  elif git rev-parse --verify refs/heads/main >/dev/null 2>&1; then
+  elif git -C "$target_path" rev-parse --verify refs/heads/main \
+    >/dev/null 2>&1; then
     target_ref="refs/heads/main"
   else
     return 0
   fi
 
   timestamp="$(date '+%Y-%m-%d %H:%M:%S%z' | sed -E 's/([+-][0-9]{2})([0-9]{2})$/\1:\2/')"
-  user_name="$(git config user.name 2>/dev/null || echo unknown)"
-  user_email="$(git config user.email 2>/dev/null || echo unknown@local)"
+  user_name="$(git -C "$target_path" config user.name 2>/dev/null || echo unknown)"
+  user_email="$(git -C "$target_path" config user.email 2>/dev/null || echo unknown@local)"
+  # ISSUES is the global warning list populated by check_git_safety.
+  if [[ "${#ISSUES[@]}" -gt 0 ]]; then
+    local issue
+    warnings=""
+    for issue in "${ISSUES[@]}"; do
+      warnings+=$'\n'"- ${issue}"
+    done
+  fi
   record=$(cat <<EOF
 --- briteRepo workflow ---
 Workflow-Type: rmclone
@@ -149,11 +203,15 @@ Workflow-User: ${user_name} <${user_email}>
 Command-Line: rmclone ${target_path##*/}
 Summary: Removed clone target ${target_path##*/}
 Target-Path: ${target_path}
+Warnings: ${warnings}
 EOF
 )
 
-  git notes --ref="$notes_ref" append -m "$record" "$target_ref" >/dev/null 2>&1 || true
-  git push origin refs/notes/briteRepo-workflow:refs/notes/briteRepo-workflow >/dev/null 2>&1 || true
+  git -C "$target_path" notes --ref="$notes_ref" append -m "$record" \
+    "$target_ref" >/dev/null 2>&1 || true
+  git -C "$target_path" push origin \
+    refs/notes/briteRepo-workflow:refs/notes/briteRepo-workflow \
+    >/dev/null 2>&1 || true
   bt_info "Logged removal to remote main workflow note"
 }
 
@@ -172,28 +230,106 @@ resolve_abs_dir() {
   )
 }
 
-check_path_safety() {
+# ---------------------------------------------------------------------------
+# Authorization and safety checks
+# ---------------------------------------------------------------------------
+
+# Allow removal for a current contributor/reviewer/approver of the target
+# clone, or for the user the clone's own local Git identity belongs to
+# (its email), even if that user's role has since been revoked or was
+# never granted.
+check_authorization() {
+  local login email contributors_file clone_email
+
+  login="$(bt_require_login || true)"
+  [[ -n "$login" ]] || \
+    bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+      "Unable to determine GitHub login identity."
+  email="$(git config user.email 2>/dev/null || true)"
+
+  contributors_file="$TARGET_ABS/config/contributors.md"
+  if [[ -f "$contributors_file" ]] && \
+    bt_contributors_has_min_role_by_login_or_email \
+      "$login" "$email" "contributor" "$contributors_file"; then
+    return 0
+  fi
+
+  clone_email="$(git -C "$TARGET_ABS" config user.email 2>/dev/null || true)"
+  if [[ -n "$clone_email" && -n "$email" && \
+    "${clone_email,,}" == "${email,,}" ]]; then
+    return 0
+  fi
+
+  bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+    "User '$login' is not a contributor, reviewer, or approver for this clone, and this clone is not associated with that user."
+}
+
+# Hard prerequisite, always enforced: the current shell cannot survive
+# the removal, so it must not be left pointed at a directory that no
+# longer exists.
+check_not_inside_target() {
   local pwd_abs
   pwd_abs="$(pwd -P)"
 
-  if [[ "$TARGET_ABS" == "/" ]]; then
-    add_issue "Refusing to remove root directory (/)."
-  fi
-
-  if [[ "$TARGET_ABS" == "$REPO_ROOT" ]]; then
-    add_issue "Refusing to remove the current $REPO_NAME repository root."
-  fi
-
   if [[ "$pwd_abs" == "$TARGET_ABS" || "$pwd_abs" == "$TARGET_ABS"/* ]]; then
-    add_issue "Current shell is inside target directory; run from outside" \
-              "target."
+    bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+      "Current shell is inside the target directory. cd elsewhere before running this command."
   fi
 }
 
+# Hard prerequisite, always enforced: refuses removing root outright.
+# Self-removal (target == REPO_ROOT) is handled separately below by
+# relocating to a temporary copy instead of refusing.
+check_path_safety() {
+  if [[ "$TARGET_ABS" == "/" ]]; then
+    bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+      "Refusing to remove root directory (/)."
+  fi
+
+  if [[ "$TARGET_ABS" == "$REPO_ROOT" ]]; then
+    relocate_and_reexec_self
+    # relocate_and_reexec_self only returns (rather than exec'ing) if
+    # relocation itself failed.
+    bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+      "Cannot remove this script's own repository: relocation to a temporary copy failed."
+  fi
+}
+
+# When the target to remove is this running script's own repository, the
+# process cannot outlive deleting its own files. Copy this script and its
+# helpers to a temporary directory, mirroring this script's own relative
+# path under REPO_ROOT (e.g. briterepo/bin) so the relocated copy's own
+# REPO_ROOT resolves under the temp directory rather than above it, then
+# re-exec against the original arguments. Returns 1 (never exits) only if
+# relocation itself fails.
+relocate_and_reexec_self() {
+  # Guard against relocating more than once; unreachable in practice
+  # since after relocation REPO_ROOT no longer equals TARGET_ABS.
+  [[ -z "${RMCLONE_RELOCATED:-}" ]] || return 1
+
+  local tmp_self_dir rel_bin_dir
+  tmp_self_dir="$(mktemp -d)" || return 1
+  rel_bin_dir="${SCRIPT_DIR#"$REPO_ROOT"/}"
+
+  # Sentinel file: lets the cleanup trap confirm it only ever acts on a
+  # directory this function itself created.
+  : > "$tmp_self_dir/.rmclone-self-copy" || return 1
+
+  mkdir -p "$tmp_self_dir/$rel_bin_dir" || return 1
+  cp -a "$SCRIPT_DIR/rmclone" "$tmp_self_dir/$rel_bin_dir/rmclone" || return 1
+  cp -a "$SCRIPT_DIR/helpers" "$tmp_self_dir/$rel_bin_dir/helpers" || return 1
+
+  bt_info "Target is this script's own repository; continuing from a temporary copy."
+  RMCLONE_RELOCATED=1 RMCLONE_SELF_TEMP_DIR="$tmp_self_dir" \
+    exec "$tmp_self_dir/$rel_bin_dir/rmclone" "${ORIGINAL_ARGS[@]}"
+}
+
 check_git_safety() {
+  # Hard prerequisite: "clone-path is a Git repository clone" (see usage),
+  # so this is enforced outright rather than added to the warning list.
   if ! git -C "$TARGET_ABS" rev-parse --git-dir >/dev/null 2>&1; then
-    add_issue "Target is not a valid Git repository: $TARGET_ABS"
-    return 0
+    bt_error_exit "$EXIT_PREREQUISITE_FAILED" \
+      "Target is not a valid Git repository: $TARGET_ABS"
   fi
 
   local status_output
@@ -216,8 +352,7 @@ check_git_safety() {
     --not --remotes 2>/dev/null || echo 0)"
   if [[ "$local_only_commits" =~ ^[0-9]+$ ]] && \
     [[ "$local_only_commits" -gt 0 ]]; then
-    add_issue "Repository has $local_only_commits local-only commits not on" \
-              "remotes."
+    add_issue "Repository has $local_only_commits local-only commits not on remotes."
   fi
 
   local origin_url
@@ -238,21 +373,38 @@ print_issues() {
 }
 
 confirm_removal() {
-  if [[ "$OVERRIDE" == true ]]; then
-    return 0
-  fi
+  local response attempt
 
-  local response
   echo ""
   bt_warn "Will permanently delete the clone and all its files: $TARGET_ABS"
-  read -r -p "Type DELETE to confirm permanent deletion: " response
 
-  if [[ "$response" != "DELETE" ]]; then
-    return 1
-  fi
+  for ((attempt = 1; attempt <= 3; attempt++)); do
+    if ! read -r -p \
+      "Type 'remove' to confirm, or 'cancel' to cancel: " \
+      response; then
+      # EOF (e.g. closed stdin or control-D) is accepted as a cancel.
+      echo ""
+      return 1
+    fi
 
-  return 0
+    case "${response,,}" in
+      remove) return 0 ;;
+      cancel) return 1 ;;
+      *) bt_warn "Invalid response: $response" ;;
+    esac
+  done
+
+  bt_error_exit "$EXIT_CANCELLED" \
+    "too many invalid responses. Skipped removing clone for ${TARGET_ABS##*/}"
 }
+
+# ---------------------------------------------------------------------------
+# Option parsing
+# ---------------------------------------------------------------------------
+
+# Preserve the original argv: relocate_and_reexec_self must re-invoke this
+# command exactly as it was first invoked, after $@ below is consumed.
+ORIGINAL_ARGS=("$@")
 
 # Parse options and arguments
 POSITIONAL_ARGS=()
@@ -264,10 +416,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     -d)
       DRY_RUN=true
-      shift
-      ;;
-    --override)
-      OVERRIDE=true
       shift
       ;;
     -t)
@@ -290,6 +438,10 @@ done
 set -- "${POSITIONAL_ARGS[@]}"
 export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
 
+# ---------------------------------------------------------------------------
+# Main flow
+# ---------------------------------------------------------------------------
+
 if [[ $# -ne 1 ]]; then
   usage_error "Expected exactly 1 argument: <clone-path>"
 fi
@@ -302,19 +454,14 @@ fi
 
 bt_info "Target clone path: $TARGET_ABS"
 
+check_authorization
+check_not_inside_target
 check_path_safety
 check_git_safety
 
 if [[ "${#ISSUES[@]}" -gt 0 ]]; then
   bt_warn "Safety checks detected potential data-loss risks:"
   print_issues
-
-  if [[ "$OVERRIDE" == false ]]; then
-    bt_error_exit "$EXIT_NOT_FOUND" \
-      "Aborting removal. Re-run with --override to override safety checks."
-  fi
-
-  bt_warn "Override enabled (--override). Continuing despite safety check failures."
 else
   bt_success "Safety checks passed."
 fi
@@ -326,27 +473,56 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 if ! confirm_removal; then
-  bt_error_exit "$EXIT_CONFIG_ERROR" "Operation cancelled. Clone not removed."
+  bt_error_exit "$EXIT_CANCELLED" "Operation cancelled. Clone not removed."
 fi
 
-# Move away if currently inside target and override was used.
-if [[ "$(pwd -P)" == "$TARGET_ABS" || "$(pwd -P)" == "$TARGET_ABS"/* ]]; then
-  cd /tmp
+# Record the removal note while the clone still exists; a git repository
+# is required to reach its remote and notes ref (best effort; a failure
+# here does not stop the removal).
+record_removal_note_on_remote_main "$TARGET_ABS"
+
+# Re-verify immediately before the destructive step: something else may
+# have replaced the target between the checks above and this point (for
+# example, swapped it for a symlink). Refuse rather than follow a link.
+if [[ -L "$TARGET_ABS" ]]; then
+  bt_error_exit "$EXIT_REMOVAL_FAILED" \
+    "Target became a symbolic link before removal; refusing to remove: $TARGET_ABS"
+fi
+if [[ ! -d "$TARGET_ABS" ]]; then
+  bt_error_exit "$EXIT_REMOVAL_FAILED" \
+    "Target is no longer a directory; refusing to remove: $TARGET_ABS"
 fi
 
 bt_info "Removing clone directory..."
 if ! rm -rf -- "$TARGET_ABS"; then
-  bt_error_exit "$EXIT_OPERATION_FAILED" \
+  bt_error_exit "$EXIT_REMOVAL_FAILED" \
     "Failed to remove clone directory: $TARGET_ABS"
 fi
 
 if [[ -e "$TARGET_ABS" ]]; then
-  bt_error_exit "$EXIT_OPERATION_FAILED" \
+  bt_error_exit "$EXIT_REMOVAL_FAILED" \
     "Target still exists after removal attempt: $TARGET_ABS"
 fi
 
 bt_success "Removed clone '$TARGET_ABS'"
 
-record_removal_note_on_remote_main "$TARGET_ABS"
+# If this clone held the briteRepo dev-clone PATH override (set by
+# mkclone; see mkclone -h), remove it so PATH falls back to any installed
+# copy.
+if declare -F bt_dev_clone_bin_path >/dev/null 2>&1; then
+  dev_bin="$(bt_dev_clone_bin_path)"
+  if [[ -n "$dev_bin" && "$dev_bin" == "$TARGET_ABS/briterepo/bin" ]]; then
+    bashrc="$HOME/.bashrc"
+    if [[ -f "$bashrc" ]]; then
+      # mktemp in the same directory as ~/.bashrc so the replacement
+      # below is an atomic same-filesystem rename.
+      tmp_bashrc="$(mktemp "$HOME/.bashrc.XXXXXX")"
+      grep -vF '# briterepo-dev-clone' "$bashrc" > "$tmp_bashrc" || true
+      mv "$tmp_bashrc" "$bashrc"
+      bt_info "Removed the PATH override for this clone."
+      bt_info "Reload your shell to use any installed copy: source ~/.bashrc && hash -r"
+    fi
+  fi
+fi
 
 exit 0

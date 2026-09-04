@@ -12,10 +12,10 @@ See `<repo>/README.md` for an introduction to the repository.
 
 ### Setup and Installation
 
-**setup_rulesets**: Configure repository rulesets for protected branch and tag
-policy. Repository owner and GitHub administration access are required.
-
-**setupclone**: Setup clone environment `<repo>/briterepo/bin/` to PATH.
+Git hooks and, for a briteRepo clone itself, PATH priority are configured
+automatically by `mkclone`; there is no separate setup script. See
+`fixlocal` to verify or repair Git hooks and GitHub rulesets for an
+existing clone.
 
 ### Document and Brand Management
 
@@ -52,7 +52,8 @@ The argument is a repository name of the authenticated user, not a directory.
 New repositories are private unless `--public` is given. The `bin/` and
 `helpers/` script directories and `.github/workflows/` are replaced with a
 fresh copy; use `--tests` to also refresh `tests/`, and `--rulesets` to run
-`setup_rulesets` after the push. It also adds `docs/md/Guide.md` with
+`setup_rulesets` after the push (or have the repository owner run `fixlocal`
+afterward). It also adds `docs/md/Guide.md` with
 `README.md` linked to it, the Contributor documents, and default branding.
 Other existing files are kept, and a canonical file whose content differs is
 added as `<name>-canonical<ext>` (for example, `README-canonical.md`). Each
@@ -61,8 +62,8 @@ failures write an error report with guidance, and `-e` forces that path.
 Updating an existing repository requires that no local clone or checkout of
 it is in use.
 
-**rmclone**: Safely remove a local clone with validation checks and optional
-override.
+**rmclone**: Safely remove a local clone with validation checks and
+confirmation.
 
 ### Branch and Workflow Management
 
@@ -149,13 +150,15 @@ Use the repair scripts in this order when more than one layer is involved:
 To make all scripts executable and add them to your PATH, run:
 
    ```sh
-   bash `<repo>/briterepo/bin/setupclone`
+   bash `<repo>/briterepo/bin/install`
    ```
 
 This script will:
 
-- Make all scripts executable (chmod +x)
-- Add `<repo>/briterepo/bin/` to PATH in ~/.bashrc
+- Copy the scripts and helpers to a standalone install directory
+  (default: `~/briterepo`)
+- Make the installed scripts executable (chmod +x)
+- Add the install directory's `bin/` to PATH in ~/.bashrc
 - Update the shell configuration for current and future sessions
 
 For an already-open terminal, reload the updated PATH before running scripts by
@@ -169,7 +172,7 @@ name:
 For more information, run:
 
   ```sh
-  bash `<repo>/briterepo/bin/setupclone` -h
+  bash `<repo>/briterepo/bin/install` -h
   ```
 
 ## Usage
@@ -187,10 +190,9 @@ For a script's usage information, execute the script using the
 
 If a script is not executable in your environment, you can:
 
-1. Run or rerun `<repo>/briterepo/bin/setupclone` (see Getting
-   Started above).
+1. Rerun `<repo>/briterepo/bin/install` (see Getting Started above).
 
-3. Manually fix individual scripts:
+2. Manually fix individual scripts:
 
    ```sh
    chmod +x `<repo>/briterepo/bin/<script_name>`
@@ -198,10 +200,9 @@ If a script is not executable in your environment, you can:
 
 ### Scripts not in PATH
 
-1. Run or rerun `<repo>/briterepo/bin/setupclone` (see Getting
-   Started above).
+1. Rerun `<repo>/briterepo/bin/install` (see Getting Started above).
 
-3. Manually update the PATH configuration:
+2. Manually update the PATH configuration:
 
    - Add this line to ~/.bashrc:
 

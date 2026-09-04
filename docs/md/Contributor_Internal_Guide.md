@@ -121,7 +121,9 @@ remote recovery steps when the local repository is clean and the issue remains.
 
 ## 3. Protected Branch and Ruleset Model
 
-The GitHub ruleset configuration is managed by `briterepo/bin/setup_rulesets`.
+The GitHub ruleset configuration is managed by
+`briterepo/bin/helpers/setup_rulesets.sh`, which `fixlocal` now invokes
+automatically for repository owners with `gh` and `jq` installed.
 Protected branches are enforced at the server level for:
 
 - `main`
@@ -141,9 +143,10 @@ repository protection. Only an actual GitHub-side admin authority can do that.
 default branch, so it applies only to a repository whose default branch is not
 yet protected, such as one it has just created. It also installs the
 `.github/workflows/` validation workflows, which are repository content rather
-than clone configuration. Run `setup_rulesets` after the layout is in place,
-either separately or with `mkrepo --rulesets`; once the rulesets are active,
-further layout changes follow the normal branch and pull request workflow.
+than clone configuration. Run `bash briterepo/bin/helpers/setup_rulesets.sh`
+after the layout is in place, either separately or with `mkrepo --rulesets`;
+once the rulesets are active, further layout changes follow the normal branch
+and pull request workflow.
 </details>
 
 <details>

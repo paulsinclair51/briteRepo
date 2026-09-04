@@ -101,8 +101,8 @@ reporting, and recovery so contributors can work with branches, changes,
 reviews, and releases without managing low-level source-control details.
 
 Use the commands in `briterepo/bin/` for repository-changing actions. After
-`setupclone`, they are normally available by name. You may also run them by
-path, such as `briterepo/bin/commit`.
+[installing briteRepo](#14-installation), they are normally available by
+name. You may also run them by path, such as `briterepo/bin/commit`.
 
 | Task | Command |
 |------|---------|
@@ -145,7 +145,8 @@ repository you use it to manage. If it is not already installed, see
 5. Configure commit signing as described in
    [Signing Commits](#7-signing-commits).
 
-If you already have a clone, run `setupclone` to configure it.
+If you already have a clone whose Git hook safeguards are missing or were
+reset, run `fixlocal` to restore them.
 
 To create a repository that uses these commands, or to add the canonical
 layout to a repository you already own, run `mkrepo <repository>`.
@@ -490,11 +491,11 @@ protected files, large files, secrets, license headers, code quality, and
 workflow configuration. When a check fails, read its first actionable error,
 correct and test the problem locally, then run `commit` and `push`.
 
-`setupclone` installs local safeguards that route repository changes through
+`mkclone` installs local safeguards that route repository changes through
 project commands. These commands perform the required policy, permission, and
 safety checks.
 
-If local safeguards are missing, run `setupclone` to restore them.
+If local safeguards are missing, run `fixlocal` to restore them.
 </details>
 
 <details>
@@ -522,6 +523,15 @@ If local safeguards are missing, run `setupclone` to restore them.
   prints. Use `fixrepo` if the problem may affect more than the current clone.
   An approver or owner may use `fixremote` when a healthy clone must restore
   the remote repository; each repair command prints its own diagnostic report.
+- **A briteRepo clone's scripts aren't the ones on PATH (rare):** `mkclone`
+  gives a fresh briteRepo clone PATH priority over any installed copy by
+  adding a line marked `# briterepo-dev-clone` to `~/.bashrc`; `rmclone`
+  removes that line when the clone is removed. If this line is ever lost or
+  points at the wrong clone, fix it manually: remove any existing line
+  containing `# briterepo-dev-clone` from `~/.bashrc`, then add
+  `export PATH="<path-to-clone>/briterepo/bin:$PATH" # briterepo-dev-clone`
+  (replacing `<path-to-clone>` with the clone's path), then run
+  `source ~/.bashrc && hash -r`.
 </details>
 
 <details>

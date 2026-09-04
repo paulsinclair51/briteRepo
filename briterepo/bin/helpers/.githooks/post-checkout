@@ -10,7 +10,8 @@
 # It checks if other hooks are installed and installs them if needed.
 #
 # This provides a safety net for the auto-installation process initiated by
-# mkclone → setupclone → install_git_hooks.sh
+# mkclone → install_git_hooks.sh (also reapplied by fixlocal if hooks are
+# later reset or misconfigured).
 
 set -euo pipefail
 

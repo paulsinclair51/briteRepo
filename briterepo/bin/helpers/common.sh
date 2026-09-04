@@ -94,6 +94,44 @@ bt_increment_counter() {
   printf -v "$var_name" '%d' "$(( ${!var_name} + 1 ))"
 }
 
+# bt_dev_clone_bin_path: Print the briteRepo clone bin/ directory currently
+# prepended to PATH by bt_set_dev_clone_path (see mkclone), or nothing if
+# none is set.
+bt_dev_clone_bin_path() {
+  local bashrc="$HOME/.bashrc"
+
+  [[ -f "$bashrc" ]] || return 0
+  sed -n 's|^export PATH="\(.*\):\$PATH" # briterepo-dev-clone$|\1|p' \
+    "$bashrc" | tail -n1
+}
+
+# bt_set_dev_clone_path: Prepend the given briteRepo clone's bin/ directory
+# to PATH ahead of any installed copy, via a uniquely marked line in
+# ~/.bashrc. Replaces any previous such line; only one clone's scripts take
+# priority at a time. Used only by mkclone, when cloning briteRepo itself;
+# undone by rmclone when that clone is removed.
+bt_set_dev_clone_path() {
+  local bin_dir="$1"
+  local bashrc="$HOME/.bashrc"
+  local marker="# briterepo-dev-clone"
+  local path_line="export PATH=\"$bin_dir:\$PATH\" $marker"
+
+  touch "$bashrc"
+  if grep -qxF "$path_line" "$bashrc"; then
+    return 0
+  fi
+
+  # mktemp in the same directory as ~/.bashrc so the replacement below is
+  # an atomic same-filesystem rename.
+  local tmp_bashrc
+  tmp_bashrc="$(mktemp "$bashrc.XXXXXX")" || return 1
+  grep -vF "$marker" "$bashrc" > "$tmp_bashrc" || true
+  mv "$tmp_bashrc" "$bashrc"
+  echo "$path_line" >> "$bashrc"
+  echo "Added $bin_dir to PATH ahead of any installed copy (~/.bashrc)."
+  echo "Reload your shell to use it: source ~/.bashrc && hash -r"
+}
+
 bt_repo_has_required_api_files() {
   local repo_path="$1"
 

@@ -208,9 +208,9 @@ pass "mkrepo adds branding, Guide.md, and the Contributor documents"
   fail "mkrepo did not add .github/CODEOWNERS"
 pass "mkrepo adds the GitHub workflows and CODEOWNERS"
 
-grep -Fq "setup_rulesets" "$WORK_DIR/new.out" || \
-  fail "mkrepo did not suggest setup_rulesets in the next steps"
-pass "mkrepo points to setup_rulesets when rulesets are not applied"
+grep -Fq "fixlocal" "$WORK_DIR/new.out" || \
+  fail "mkrepo did not suggest fixlocal in the next steps"
+pass "mkrepo points to fixlocal when rulesets are not applied"
 
 grep -Fq '# `<repo>/docs/`' "$WORK_DIR/verify-new/docs/README.md" || \
   fail "docs/README.md missing canonical heading"

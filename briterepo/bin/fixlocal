@@ -77,6 +77,9 @@ Remote results:
 Features:
   - Checks local Git data for damage.
   - Verifies uncommitted changes and required repository files.
+  - Verifies and repairs Git hooks configuration (core.hooksPath).
+  - Verifies and (for the repository owner) repairs GitHub repository
+    rulesets.
   - Checks remote access and branch synchronization.
   - Refreshes remote branch information when comparisons are unavailable.
   - Safely updates the current local branch from its remote branch when needed.
@@ -1136,6 +1139,122 @@ check_repository_layout() {
   check_repository_structure
 }
 
+# Ensures core.hooksPath points at this running tooling's shared .githooks
+# (hooks come from wherever the tooling lives, not a per-repo vendored
+# copy; see helpers/install_git_hooks.sh). Safe to reapply; auto-fixed
+# unless -d is used.
+check_git_hooks_configuration() {
+  append_section "Git Hooks Configuration"
+
+  local hook_installer="$SCRIPT_DIR/helpers/install_git_hooks.sh"
+  if [[ ! -f "$hook_installer" ]]; then
+    append_check "Git Hooks Configuration" "ISSUE" \
+      "Hook installer not found at $hook_installer. Not auto-handled;" \
+      "suggested fix: Restore this file from main or a trusted clone."
+    return 1
+  fi
+
+  local expected_hooks_path configured_hooks_path
+  expected_hooks_path="$SCRIPT_DIR/helpers/.githooks"
+  configured_hooks_path="$(git -C "$CURRENT_REPO" config core.hooksPath \
+    2>/dev/null || true)"
+
+  if [[ "$configured_hooks_path" == "$expected_hooks_path" ]]; then
+    append_check "Git Hooks Configuration" "PASS" \
+      "core.hooksPath is configured correctly"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    append_check "Git Hooks Configuration" "FIXABLE" \
+      "core.hooksPath is not set to the expected shared hooks directory." \
+      "true"
+    return 0
+  fi
+
+  bt_increment_counter REMEDIATIONS_ATTEMPTED
+  if (cd "$CURRENT_REPO" && bash "$hook_installer" --silent); then
+    append_check "Git Hooks Configuration" "PASS" \
+      "Configured core.hooksPath to the shared hooks directory"
+    bt_increment_counter REMEDIATIONS_VERIFIED
+    return 0
+  fi
+
+  append_check "Git Hooks Configuration" "ISSUE" \
+    "Failed to configure Git hooks. Not auto-handled; suggested fix: run" \
+    "manually: cd $CURRENT_REPO && bash $hook_installer"
+  bt_increment_counter REMEDIATIONS_FAILED
+  return 1
+}
+
+# Verifies (and, for the repository owner, repairs) GitHub repository
+# rulesets via helpers/setup_rulesets.sh. Skipped gracefully when gh/jq are
+# unavailable, there's no GitHub origin, or the user is not the repository
+# owner (ruleset changes require GitHub admin permission).
+check_github_rulesets() {
+  append_section "GitHub Rulesets"
+
+  local ruleset_helper="$SCRIPT_DIR/helpers/setup_rulesets.sh"
+  if [[ ! -f "$ruleset_helper" ]]; then
+    append_check "GitHub Rulesets" "ISSUE" \
+      "Ruleset helper not found at $ruleset_helper. Not auto-handled;" \
+      "suggested fix: Restore this file from main or a trusted clone."
+    return 1
+  fi
+
+  if ! command -v gh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    append_check "GitHub Rulesets" "PASS" \
+      "Skipped: gh and/or jq are not installed."
+    return 0
+  fi
+
+  local origin_url
+  origin_url="$(git -C "$CURRENT_REPO" remote get-url origin \
+    2>/dev/null || true)"
+  if [[ ! "$origin_url" =~ github\.com ]]; then
+    append_check "GitHub Rulesets" "PASS" \
+      "Skipped: no GitHub origin remote for this repository."
+    return 0
+  fi
+
+  local actor_login
+  actor_login="$(bt_require_login 2>/dev/null || true)"
+  if [[ -z "$actor_login" ]] || \
+    ! bt_is_repository_owner_login "$actor_login"; then
+    append_check "GitHub Rulesets" "PASS" \
+      "Skipped: ruleset changes require the repository owner (requires" \
+      "GitHub admin permission)."
+    return 0
+  fi
+
+  if (cd "$CURRENT_REPO" && bash "$ruleset_helper" --check) \
+    >/dev/null 2>&1; then
+    append_check "GitHub Rulesets" "PASS" \
+      "Rulesets match repository policy"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    append_check "GitHub Rulesets" "FIXABLE" \
+      "Rulesets do not match repository policy." "true"
+    return 0
+  fi
+
+  bt_increment_counter REMEDIATIONS_ATTEMPTED
+  if (cd "$CURRENT_REPO" && bash "$ruleset_helper") >/dev/null 2>&1; then
+    append_check "GitHub Rulesets" "PASS" \
+      "Rulesets were updated to match repository policy"
+    bt_increment_counter REMEDIATIONS_VERIFIED
+    return 0
+  fi
+
+  append_check "GitHub Rulesets" "ISSUE" \
+    "Failed to update rulesets. Not auto-handled; suggested fix: run" \
+    "manually: cd $CURRENT_REPO && bash $ruleset_helper"
+  bt_increment_counter REMEDIATIONS_FAILED
+  return 1
+}
+
 cleanup_repository() {
   if [[ "$DRY_RUN" == true ]] || \
     [[ "$TARGET_FIXABLE_ISSUES_FOUND" -eq 0 ]]; then
@@ -1254,6 +1373,9 @@ run_target_checks() {
     safe_sync_current_branch_from_upstream || true
   run_noncritical_check "Repository Structure Checks" \
     check_repository_layout || true
+  run_noncritical_check "Git Hooks Configuration" \
+    check_git_hooks_configuration || true
+  run_noncritical_check "GitHub Rulesets" check_github_rulesets || true
   run_noncritical_check "Cleanup Operations" cleanup_repository || true
 
   return 0

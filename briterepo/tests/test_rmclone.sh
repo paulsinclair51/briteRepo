@@ -79,12 +79,27 @@ run_rmclone() {
     "cd '$RUNNER' && bash ./briterepo/bin/rmclone $*"
 }
 
+# Like run_rmclone, but feeds a single line of input to the confirmation
+# prompt (rmclone always requires interactive confirmation before removing).
+run_rmclone_confirm() {
+  local outfile="$1"
+  local response="$2"
+  shift 2
+  set +e
+  printf '%s\n' "$response" | env HOME="$TMPDIR" bash -c \
+    "cd '$RUNNER' && bash ./briterepo/bin/rmclone $*" >"$outfile" 2>&1
+  local status=$?
+  set -e
+  echo "$status"
+}
+
 # 1) Help output documents the supported options.
 rc=$(run_rmclone "$TMPDIR/help.out" -h)
 [[ "$rc" -eq 0 ]] || fail "rmclone -h should exit 0 (got $rc)"
 assert_contains "Usage:" "$TMPDIR/help.out"
 assert_contains "-d          Dry-run." "$TMPDIR/help.out"
-assert_contains "--override  Override safety checks" "$TMPDIR/help.out"
+assert_contains "the valid case-insensitive responses (remove, cancel)" \
+  "$TMPDIR/help.out"
 pass "help output"
 
 # 2) Undocumented aliases are rejected.
@@ -129,23 +144,26 @@ assert_contains "Would remove clone directory" "$TMPDIR/dryrun.out"
 [[ -d "$TMPDIR/clone-dry" ]] || fail "rmclone -d must not remove the clone"
 pass "dry-run leaves the clone in place"
 
-# 7) Safety checks block removal of a dirty clone without --override.
+# 7) Safety checks warn about a dirty clone but do not block it; 'cancel'
+# leaves the clone in place.
 make_clone "$TMPDIR/clone-dirty"
 echo "uncommitted" > "$TMPDIR/clone-dirty/dirty.txt"
-rc=$(run_rmclone "$TMPDIR/dirty.out" "$TMPDIR/clone-dirty")
-[[ "$rc" -eq 2 ]] || fail "dirty clone removal should exit 2 (got $rc)"
-assert_contains "Working tree is not clean" "$TMPDIR/dirty.out"
-assert_contains "Re-run with --override to override safety checks." \
-  "$TMPDIR/dirty.out"
-[[ -d "$TMPDIR/clone-dirty" ]] || fail "blocked removal must keep the clone"
-pass "dirty clone blocked without override"
+rc=$(run_rmclone_confirm "$TMPDIR/dirty-cancel.out" "cancel" \
+  "$TMPDIR/clone-dirty")
+[[ "$rc" -eq 3 ]] || fail "cancelled dirty clone removal should exit 3 (got $rc)"
+assert_contains "Working tree is not clean" "$TMPDIR/dirty-cancel.out"
+assert_contains "Operation cancelled" "$TMPDIR/dirty-cancel.out"
+[[ -d "$TMPDIR/clone-dirty" ]] || fail "cancelled removal must keep the clone"
+pass "dirty clone warning does not block cancellation"
 
-# 8) --override bypasses the safety checks and the confirmation prompt.
-rc=$(run_rmclone "$TMPDIR/override.out" --override "$TMPDIR/clone-dirty")
-[[ "$rc" -eq 0 ]] || fail "rmclone --override should exit 0 (got $rc)"
-assert_contains "Override enabled (--override)." "$TMPDIR/override.out"
-[[ ! -e "$TMPDIR/clone-dirty" ]] || fail "--override should remove the clone"
-pass "override removes a dirty clone"
+# 8) Confirming 'remove' removes a dirty clone despite the warning.
+rc=$(run_rmclone_confirm "$TMPDIR/dirty-remove.out" "remove" \
+  "$TMPDIR/clone-dirty")
+[[ "$rc" -eq 0 ]] || fail "confirmed dirty clone removal should exit 0 (got $rc)"
+assert_contains "Working tree is not clean" "$TMPDIR/dirty-remove.out"
+assert_contains "Removed clone" "$TMPDIR/dirty-remove.out"
+[[ ! -e "$TMPDIR/clone-dirty" ]] || fail "confirmed removal should remove the clone"
+pass "confirmed removal proceeds despite warnings"
 
 # 9) A non-Git directory is reported as unsafe.
 mkdir -p "$TMPDIR/plain-dir"
@@ -154,16 +172,38 @@ rc=$(run_rmclone "$TMPDIR/plain.out" "$TMPDIR/plain-dir")
 assert_contains "Target is not a valid Git repository" "$TMPDIR/plain.out"
 pass "non-Git target blocked"
 
-# 10) The repository rmclone runs from is never a removal target.
-rc=$(run_rmclone "$TMPDIR/self.out" "$RUNNER")
-[[ "$rc" -eq 2 ]] || fail "removing the runner repository should exit 2 (got $rc)"
-assert_contains "Refusing to remove the current" "$TMPDIR/self.out"
-[[ -d "$RUNNER" ]] || fail "runner repository must not be removed"
-pass "repository root is protected"
+# 10) Removing the repository rmclone runs from relocates to a temporary
+# copy and completes the removal, rather than refusing, once confirmed.
+SELF_RUNNER="$TMPDIR/self-runner"
+mkdir -p "$SELF_RUNNER/briterepo/bin/helpers"
+cp "$RMCLONE_SRC" "$SELF_RUNNER/briterepo/bin/rmclone"
+cp "$COMMON_HELPER_SRC" "$SELF_RUNNER/briterepo/bin/helpers/common.sh"
+cp "$GIT_HELPER_SRC" "$SELF_RUNNER/briterepo/bin/helpers/git_helpers.sh"
+cp "$HISTORY_HELPER_SRC" "$SELF_RUNNER/briterepo/bin/helpers/history_log.sh"
+chmod +x "$SELF_RUNNER/briterepo/bin/rmclone"
+(
+  cd "$SELF_RUNNER"
+  git_quiet init -q .
+  echo runner > runner.txt
+  git_quiet add -A
+  git_quiet commit -qm "runner fixture"
+)
 
-# 11) A clean clone is removed once safety checks pass.
+set +e
+printf 'remove\n' | env HOME="$TMPDIR" bash -c \
+  "cd '$TMPDIR' && bash '$SELF_RUNNER/briterepo/bin/rmclone' '$SELF_RUNNER'" \
+  >"$TMPDIR/self.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]] || fail "removing own repository should exit 0 via relocation (got $rc)"
+assert_contains "continuing from a temporary copy" "$TMPDIR/self.out"
+assert_contains "Removed clone" "$TMPDIR/self.out"
+[[ ! -e "$SELF_RUNNER" ]] || fail "self-removal via relocation should remove the repository"
+pass "repository root is removed via temporary relocation"
+
+# 11) A clean clone is removed once confirmed.
 make_clone "$TMPDIR/clone-clean"
-rc=$(run_rmclone "$TMPDIR/clean.out" --override "$TMPDIR/clone-clean")
+rc=$(run_rmclone_confirm "$TMPDIR/clean.out" "remove" "$TMPDIR/clone-clean")
 [[ "$rc" -eq 0 ]] || fail "clean clone removal should exit 0 (got $rc)"
 assert_contains "Safety checks passed." "$TMPDIR/clean.out"
 assert_contains "Removed clone" "$TMPDIR/clean.out"

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-# setup_rulesets - Setup result sets for approvers, reviewers, and contributors.
+# setup_rulesets.sh - Create, update, or verify GitHub repository rulesets.
+#
+# Typically invoked by fixlocal as part of its checks/fixes, not run
+# directly. Can still be run directly for manual use.
 #
 # Copyright (c) 2026 Paul Sinclair
 # SPDX-License-Identifier: MIT
@@ -9,8 +12,8 @@
 usage() {
   cat <<'EOF'
 Usage:
-  setup_rulesets [--check] [REPOSITORY]
-  setup_rulesets {-h | --help}
+  bash helpers/setup_rulesets.sh [--check] [REPOSITORY]
+  bash helpers/setup_rulesets.sh {-h | --help}
 
 Create or update the repository rulesets, or verify them with --check.
 
@@ -31,13 +34,13 @@ Options:
 
 Examples:
   # Configure the default repository.
-  setup_rulesets
+  bash helpers/setup_rulesets.sh
 
   # Configure a specified repository.
-  setup_rulesets OWNER/NAME
+  bash helpers/setup_rulesets.sh OWNER/NAME
 
   # Verify rulesets without changing them.
-  setup_rulesets --check OWNER/NAME
+  bash helpers/setup_rulesets.sh --check OWNER/NAME
 
 Outputs:
   - Writes status messages and results to stdout.
@@ -162,10 +165,10 @@ upsert_ruleset() {
 
   if [[ -n "${existing_id:-}" && "${existing_id}" != "null" ]]; then
     echo "Updating ruleset: ${name} (id=${existing_id})"
-    
+
     # Cleanup any other duplicates with same name
     cleanup_duplicates "$name" "$existing_id"
-    
+
     gh api \
       --method PUT \
       -H "Accept: application/vnd.github+json" \
