@@ -838,8 +838,7 @@ if [[ "$OWNER_OVERRIDE" == true ]]; then
   else
     bt_emit_prerequisite_failure "$EXIT_NOT_REPOSITORY_OWNER" \
       "Option -o is allowed only for the repository owner." \
-      "use an account and merge path authorized by repository policy, then" \
-      "rerun pull."
+      "sign in as the repository owner or rerun without -o"
   fi
 fi
 

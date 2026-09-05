@@ -501,7 +501,9 @@ require_approver_login() {
   }
 
   if ! is_approver_login "$login"; then
-    bt_error_exit "$EXIT_CONFIG_ERROR" "User '$login' is not an approver"
+    bt_emit_prerequisite_failure "$EXIT_CONFIG_ERROR" \
+      "User '$login' is not an approver" \
+      "contact an approver or repository owner"
   fi
 
   echo "$login"

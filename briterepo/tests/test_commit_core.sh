@@ -102,7 +102,7 @@ printf '\nunauthorized role test\n' >> "$WORK/README.md"
 rc=$(run_capture "$TMPDIR/unauth.out" env GITHUB_ACTOR=outsider bash -lc "cd '$WORK' && bash ./briterepo/bin/commit -d -c 'test unauthorized'")
 [[ "$rc" -eq 3 ]] || fail "unauthorized user should exit 3 (got $rc)"
 assert_contains "Error: User 'outsider' is not authorized to run commit (requires contributor role or higher)" "$TMPDIR/unauth.out"
-assert_contains "Guidance: use an account and merge path authorized by repository policy, then rerun commit." "$TMPDIR/unauth.out"
+assert_contains "Guidance: contact an approver or repository owner." "$TMPDIR/unauth.out"
 (
   cd "$WORK"
   git config user.email "test@example.com"

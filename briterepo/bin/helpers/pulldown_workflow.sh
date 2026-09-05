@@ -490,8 +490,8 @@ if bt_is_protected_branch "$CURRENT_BRANCH"; then
     bt_info "Allowing protected source synchronization for active pushup"
   else
     bt_emit_prerequisite_failure "$EXIT_CONFIG_ERROR" \
-      "Cannot sync up on protected branch '$CURRENT_BRANCH'." \
-      "use pushup to merge changes to this branch."
+      "Branch '$CURRENT_BRANCH' is protected and cannot be synced with pulldown" \
+      "use pushup to merge changes, or contact an approver if this is unexpected"
   fi
 fi
 

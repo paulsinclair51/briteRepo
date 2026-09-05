@@ -16,7 +16,7 @@ Usage:
   chbranch [-l | -r] -c [-t SEC] [-v]
   chbranch {-h | --help}
 
-Change current branch based on arguments and options provided.
+Change the current branch.
 
 Prerequisites:
   - The current branch must not have any uncommitted changes except when
@@ -36,9 +36,9 @@ Options:
               allowed with -b. Defaults to the local previous branch; use -r
               to select the remote previous branch copy.
               This option is mutually exclusive with -c and -p.
-  -c          Change to the most recently selected child branch. BRANCH is not
-              allowed with -c. Defaults to the local stacked branch; use -r
-              to select the remote stacked branch copy.
+  -c          Change to the most recently selected branch in the child stack.
+              BRANCH is not allowed with -c. Defaults to the local branch; use
+              -r to select the remote branch copy.
               This option is mutually exclusive with -b and -p.
   -h, --help  Output this help to stdout and exit (other options and
               arguments are ignored).
@@ -46,7 +46,7 @@ Options:
   -p          Change to the parent of BRANCH. If BRANCH is omitted, change to
               the parent of the current branch. Defaults to the local parent;
               use -r to select the remote parent copy.
-              This option is mutually exclusive with -b and -u.
+              This option is mutually exclusive with -b and -c.
   -r          Change to a fresh read-only copy of remote BRANCH. The remote must be
               reachable. This option is mutually exclusive with -l.
   -t SEC      Timeout in seconds for accessing remote branch (default
@@ -69,6 +69,10 @@ Notes:
     explaining why is output to stdout.
   - Protected branches, remote copies, and branches with invalid names are
     effectively read-only. chbranch prints a warning when one is selected.
+  - -b returns to the immediately previous branch. -c follows the selection
+    history below the current branch; use -p to select the branch's parent.
+    Reselecting the current branch does not change either history.
+  - Changing branches does not modify repository history or the remote.
   - Undo accidental changes to a read-only branch before changing to another
     branch. To make changes, switch to a local contributor or targeted branch
     (create one first using mkbranch if it doesn't exist).
@@ -113,14 +117,11 @@ Status tags:
                                 branch is not available locally or among
                                 downloaded remote branches. It may not have
                                 been fetched, or it may have been deleted.
-  [parent NAME behind by N]
-                                Selected branch has N file or directory changes
+  [parent NAME behind by N]     Selected branch has N file or directory changes
                                 not on its parent.
-  [parent NAME ahead by N]
-                                Parent has N file or directory changes not on
+  [parent NAME ahead by N]      Parent has N file or directory changes not on
                                 the selected branch.
-  [parent NAME differs by N]
-                                Selected branch and parent content differs by N
+  [parent NAME differs by N]    Selected branch and parent content differs by N
                                 file or directory changes.
   [copyfix in progress]         Rerun copyfix to resume.
   [pushup in progress]          Rerun pushup to resume.
@@ -134,13 +135,14 @@ Exit codes:
   1    Invalid option or argument.
   2    Current branch has uncommitted changes; commit/undo and then rerun.
   3    Branch not found, no previous branch is recorded, no branch stack entry
-      is recorded, or parent branch cannot be resolved.
+       is recorded, or parent branch cannot be resolved.
   4    Local branch not found when -l specified.
   5    Remote branch not found when -r specified.
   6    Remote is not connected/reachable.
   7    Timeout waiting for remote to be reachable.
   8    Running outside a Git repository.
   9    Required command is not available (git or timeout).
+  10   Another branch-changing operation is active for this repository.
   200  Git failed to change branches.
 EOF
 }
@@ -148,24 +150,25 @@ EOF
 # High-Level Flow:
 # 1. Honor help before validating the environment.
 # 2. Verify required commands and Git repository context.
-# 3. Parse options and resolve BRANCH.
+# 3. Acquire branch-selection and active pushup locks.
+# 4. Parse options and resolve BRANCH.
 #    - If BRANCH is omitted, resolve the current local branch or remote
 #      snapshot; if state is ambiguous, use the last successfully
 #      selected branch name.
-# 4. Validate branch name and policy constraints.
-# 5. Determine desired checkout mode.
+# 5. Validate branch name and policy constraints.
+# 6. Determine desired checkout mode.
 #    - Default: local when BRANCH exists locally; otherwise remote.
 #    - Explicit: -l forces local mode, -r forces remote mode.
-# 6. Apply branch policy.
+# 7. Apply branch policy.
 #    - Protected local branches remain attached but effectively read-only.
 #    - Remote and policy-invalid local selections are detached/read-only.
-# 7. Require a clean tree unless reselecting the current writable local branch.
-# 8. Select the requested target.
-#    - Local mode: select the local ref, then refresh remote status.
+# 8. Require a clean tree unless reselecting the current writable local branch.
+# 9. Select the requested target.
+#    - Local mode: select the local ref and refresh protected branches.
 #    - Protected local mode: safely fast-forward when possible.
-#    - Remote mode: require and refresh origin/BRANCH, then select its snapshot.
-# 9. Persist the branch name only after a successful selection.
-# 10. Output the selected branch with current worktree, policy, connectivity,
+#    - Remote mode: require and refresh origin/BRANCH, then select its local copy.
+# 10. Persist the branch name only after a successful selection.
+# 11. Output the selected branch with current worktree, policy, connectivity,
 #     local/remote history, and parent history status tags.
 
 set -euo pipefail
@@ -192,19 +195,18 @@ readonly EXIT_REMOTE_UNREACHABLE=6
 readonly EXIT_REMOTE_TIMEOUT=7
 readonly EXIT_NOT_GIT_REPO=8
 readonly EXIT_REQUIRED_COMMAND_MISSING=9
+readonly EXIT_LOCKED=10
 readonly EXIT_CHANGE_FAILED=200
 readonly REMOTE_REF_AVAILABLE=0
 readonly REMOTE_REF_MISSING=1
 readonly REMOTE_REF_OFFLINE=2
 readonly REMOTE_REF_TIMEOUT=3
+readonly REMOTE_REACCESS_MULTIPLIER=3
 
 VERBOSE=false
 REMOTE_TIMEOUT_SECONDS=10
-REMOTE_SOURCE_BRANCH=""
-# Result of the latest remote query for the branch being selected. Status-only
-# local queries remain non-fatal and map network, authentication, and timeout
-# failures to "offline".
-SELECTED_REMOTE_STATE="unknown"
+CHBRANCH_LOCK_FD=""
+PUSHUP_LOCK_FD=""
 readonly LAST_BRANCH_KEY="chbranch.lastBranch"
 readonly PREVIOUS_BRANCH_KEY="chbranch.previousBranch"
 readonly BRANCH_STACK_KEY="chbranch.branchStack"
@@ -237,7 +239,7 @@ show_help_if_requested() {
 ensure_required_commands() {
   local command_name
 
-  for command_name in git timeout; do
+  for command_name in git timeout flock; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       bt_error_exit "$EXIT_REQUIRED_COMMAND_MISSING" \
         "Required command '$command_name' is not available"
@@ -246,7 +248,9 @@ ensure_required_commands() {
 }
 
 emit_success_changed() {
-  "$SCRIPT_DIR/lsbranch"
+  if ! "$SCRIPT_DIR/lsbranch"; then
+    bt_warn "Warning: Branch selected, but its status summary could not be generated."
+  fi
 }
 
 ensure_git_repository() {
@@ -254,6 +258,55 @@ ensure_git_repository() {
     bt_error_exit "$EXIT_NOT_GIT_REPO" \
       "This command must be run from inside a git repository"
   fi
+}
+
+acquire_chbranch_lock() {
+  local lock_file=""
+
+  lock_file="$(git rev-parse --git-path briteRepo/chbranch.lock 2>/dev/null || true)"
+  [[ -n "$lock_file" ]] || bt_error_exit "$EXIT_CHANGE_FAILED" \
+    "Failed to create the chbranch lock path"
+  mkdir -p "$(dirname "$lock_file")" || \
+    bt_error_exit "$EXIT_CHANGE_FAILED" "Failed to create the chbranch lock directory"
+  exec {CHBRANCH_LOCK_FD}>"$lock_file"
+  if ! flock -n "$CHBRANCH_LOCK_FD"; then
+    bt_error_exit "$EXIT_LOCKED" \
+      "Another chbranch operation is active for this repository"
+  fi
+}
+
+acquire_pushup_lock() {
+  local lock_file=""
+
+  lock_file="$(git rev-parse --git-path briteRepo/pushup.lock 2>/dev/null || true)"
+  [[ -n "$lock_file" ]] || bt_error_exit "$EXIT_CHANGE_FAILED" \
+    "Failed to create the pushup lock path"
+  mkdir -p "$(dirname "$lock_file")" || \
+    bt_error_exit "$EXIT_CHANGE_FAILED" "Failed to create the pushup lock directory"
+  exec {PUSHUP_LOCK_FD}>"$lock_file"
+  if ! flock -n "$PUSHUP_LOCK_FD"; then
+    bt_error_exit "$EXIT_LOCKED" \
+      "A pushup operation is active for this repository"
+  fi
+}
+
+release_chbranch_lock() {
+  [[ -n "$CHBRANCH_LOCK_FD" ]] || return 0
+  flock -u "$CHBRANCH_LOCK_FD" 2>/dev/null || true
+  eval "exec ${CHBRANCH_LOCK_FD}>&-"
+  CHBRANCH_LOCK_FD=""
+}
+
+release_pushup_lock() {
+  [[ -n "$PUSHUP_LOCK_FD" ]] || return 0
+  flock -u "$PUSHUP_LOCK_FD" 2>/dev/null || true
+  eval "exec ${PUSHUP_LOCK_FD}>&-"
+  PUSHUP_LOCK_FD=""
+}
+
+release_locks() {
+  release_chbranch_lock
+  release_pushup_lock
 }
 
 branch_exists_local() {
@@ -270,6 +323,22 @@ is_remote_copy_branch() {
 
 current_local_branch() {
   git symbolic-ref -q --short HEAD 2>/dev/null || true
+}
+
+switch_or_error() {
+  local action="$1"
+  local git_output=""
+  shift
+
+  if git_output="$(git switch "$@" 2>&1)"; then
+    return 0
+  fi
+
+  git_output="$(bt_normalize_whitespace "$git_output")"
+  if [[ -n "$git_output" ]]; then
+    action+=": $git_output"
+  fi
+  bt_error_exit "$EXIT_CHANGE_FAILED" "$action"
 }
 
 remember_last_branch() {
@@ -467,11 +536,18 @@ fetch_remote_branch_ref() {
     rc=$?
   fi
 
-  if [[ "$rc" -eq 124 ]]; then
-    return "$REMOTE_REF_TIMEOUT"
-  fi
-
   if [[ "$rc" -ne 0 ]]; then
+    verbose_info "Remote fetch failed; retrying with a longer timeout."
+    if BT_REMOTE_TIMEOUT_SECONDS="$((REMOTE_TIMEOUT_SECONDS * REMOTE_REACCESS_MULTIPLIER))" \
+      bt_run_remote_command git fetch origin \
+        "+refs/heads/$branch:refs/remotes/origin/$branch" >/dev/null 2>&1; then
+      return 0
+    else
+      rc=$?
+    fi
+    if [[ "$rc" -eq 124 ]]; then
+      return "$REMOTE_REF_TIMEOUT"
+    fi
     return "$REMOTE_REF_OFFLINE"
   fi
 
@@ -481,31 +557,7 @@ fetch_remote_branch_ref() {
 refresh_remote_branch_ref() {
   local branch="$1"
 
-  fetch_remote_branch_ref "$branch" || return $?
-
-  # Remote workflow history is independent of local workflow history. A
-  # missing notes ref is valid when no remote-modifying command has run yet.
-  bt_run_remote_command git fetch origin \
-    "+refs/notes/briteRepo-remote-workflow:refs/notes/briteRepo-remote-workflow" \
-    >/dev/null 2>&1 || true
-
-  return 0
-}
-
-refresh_remote_status_ref() {
-  local branch="$1"
-  local rc=0
-
-  if fetch_remote_branch_ref "$branch"; then
-    rc=0
-  else
-    rc=$?
-  fi
-  case "$rc" in
-    "$REMOTE_REF_AVAILABLE") SELECTED_REMOTE_STATE="reachable" ;;
-    "$REMOTE_REF_MISSING") SELECTED_REMOTE_STATE="missing" ;;
-    *) SELECTED_REMOTE_STATE="offline" ;;
-  esac
+  fetch_remote_branch_ref "$branch"
 }
 
 ensure_remote_ref_available() {
@@ -520,20 +572,16 @@ ensure_remote_ref_available() {
   fi
   case "$rc" in
     "$REMOTE_REF_AVAILABLE")
-      SELECTED_REMOTE_STATE="reachable"
       return 0
       ;;
     "$REMOTE_REF_MISSING")
-      SELECTED_REMOTE_STATE="missing"
       return 1
       ;;
     "$REMOTE_REF_TIMEOUT")
-      SELECTED_REMOTE_STATE="offline"
       bt_error_exit "$EXIT_REMOTE_TIMEOUT" \
         "Timeout waiting for remote branch '$branch' to be reachable"
       ;;
     "$REMOTE_REF_OFFLINE")
-      SELECTED_REMOTE_STATE="offline"
       msg="Remote branch is not connected/reachable while checking '$branch' "
       msg+="(offline or auth issue)."
       bt_error_exit "$EXIT_REMOTE_UNREACHABLE" \
@@ -542,34 +590,13 @@ ensure_remote_ref_available() {
   esac
 }
 
-is_current_remote_branch() {
-  local branch="$1"
-  local local_branch
-  local head_sha
-  local remote_sha
-
-  local_branch="$(current_local_branch)"
-  if [[ -n "$local_branch" ]]; then
-    return 1
-  fi
-
-  head_sha="$(git rev-parse --verify HEAD 2>/dev/null || true)"
-  remote_sha="$(git rev-parse --verify "refs/remotes/origin/$branch" \
-    2>/dev/null || true)"
-
-  [[ -n "$head_sha" && -n "$remote_sha" && "$head_sha" == "$remote_sha" ]]
-}
-
 switch_local() {
   local branch="$1"
   local previous_branch="${2:-}"
   local stack_action="${3:-push}"
 
   verbose_info "Switching to local branch '$branch'"
-  if ! git switch "$branch" >/dev/null 2>&1; then
-    bt_error_exit "$EXIT_CHANGE_FAILED" \
-      "Failed to switch to local branch '$branch'"
-  fi
+  switch_or_error "Failed to switch to local branch '$branch'" "$branch"
   remember_successful_selection "$branch" "$previous_branch" "$stack_action"
 }
 
@@ -579,17 +606,13 @@ switch_remote_copy() {
   local stack_action="${3:-push}"
   local local_branch="r-$branch"
 
-  REMOTE_SOURCE_BRANCH="$branch"
-
   verbose_info "Switching to local remote copy '$local_branch'"
   if branch_exists_local "$local_branch"; then
-    if ! git switch -C "$local_branch" "origin/$branch" >/dev/null 2>&1; then
-      bt_error_exit "$EXIT_CHANGE_FAILED" \
-        "Failed to refresh local remote copy '$local_branch'"
-    fi
-  elif ! git switch -c "$local_branch" "origin/$branch" >/dev/null 2>&1; then
-    bt_error_exit "$EXIT_CHANGE_FAILED" \
-      "Failed to create local remote copy '$local_branch'"
+    switch_or_error "Failed to refresh local remote copy '$local_branch'" \
+      -C "$local_branch" "origin/$branch"
+  else
+    switch_or_error "Failed to create local remote copy '$local_branch'" \
+      -c "$local_branch" "origin/$branch"
   fi
   remember_successful_selection "$branch" "$previous_branch" "$stack_action"
 }
@@ -600,10 +623,8 @@ switch_local_snapshot() {
   local stack_action="${3:-push}"
 
   verbose_info "Switching to read-only local branch '$branch'"
-  if ! git switch --detach "$branch" >/dev/null 2>&1; then
-    bt_error_exit "$EXIT_CHANGE_FAILED" \
-      "Failed to switch to read-only local branch '$branch'"
-  fi
+  switch_or_error "Failed to switch to read-only local branch '$branch'" \
+    --detach "$branch"
   remember_successful_selection "$branch" "$previous_branch" "$stack_action"
 }
 
@@ -629,19 +650,17 @@ refresh_selected_local_protected_branch() {
     refresh_rc=$?
   fi
   case "$refresh_rc" in
-    "$REMOTE_REF_AVAILABLE") SELECTED_REMOTE_STATE="reachable" ;;
+    "$REMOTE_REF_AVAILABLE")
+      ;;
     "$REMOTE_REF_MISSING")
-      SELECTED_REMOTE_STATE="missing"
       bt_warn "${warning_prefix}origin/$branch does not exist."
       return 0
       ;;
     "$REMOTE_REF_TIMEOUT")
-      SELECTED_REMOTE_STATE="offline"
       bt_warn "${warning_prefix}the remote request timed out."
       return 0
       ;;
     *)
-      SELECTED_REMOTE_STATE="offline"
       bt_warn "${warning_prefix}the remote is not reachable."
       return 0
       ;;
@@ -691,7 +710,7 @@ parse_args() {
   FORCE_LOCAL=false
   USE_PARENT=false
   USE_PREVIOUS=false
-  USE_UP=false
+  USE_CHILD=false
   BRANCH_ARG=""
 
   while [[ $# -gt 0 ]]; do
@@ -709,7 +728,7 @@ parse_args() {
         USE_PREVIOUS=true
         ;;
       -c)
-        USE_UP=true
+        USE_CHILD=true
         ;;
       -t)
         shift
@@ -744,14 +763,14 @@ parse_args() {
     arg_error "Options -l and -r are mutually exclusive"
   fi
   if [[ "$USE_PARENT" == true && "$USE_PREVIOUS" == true ]] || \
-    [[ "$USE_PARENT" == true && "$USE_UP" == true ]] || \
-    [[ "$USE_PREVIOUS" == true && "$USE_UP" == true ]]; then
+    [[ "$USE_PARENT" == true && "$USE_CHILD" == true ]] || \
+    [[ "$USE_PREVIOUS" == true && "$USE_CHILD" == true ]]; then
     arg_error "Options -p, -b, and -c are mutually exclusive"
   fi
   if [[ "$USE_PREVIOUS" == true && -n "$BRANCH_ARG" ]]; then
     arg_error "BRANCH is not allowed with -b"
   fi
-  if [[ "$USE_UP" == true && -n "$BRANCH_ARG" ]]; then
+  if [[ "$USE_CHILD" == true && -n "$BRANCH_ARG" ]]; then
     arg_error "BRANCH is not allowed with -c"
   fi
 
@@ -782,7 +801,7 @@ resolve_navigation_branch() {
     return 0
   fi
 
-  if [[ "$USE_UP" == true ]]; then
+  if [[ "$USE_CHILD" == true ]]; then
     child_selection="$(child_branch_from_stack_or_empty \
       "$(current_branch_name_or_empty)")"
     IFS=$'\t' read -r CHILD_STACK_POP_COUNT BRANCH_ARG <<< "$child_selection"
@@ -862,6 +881,9 @@ main() {
   ensure_required_commands
   parse_args "$@"
   ensure_git_repository
+  acquire_pushup_lock
+  acquire_chbranch_lock
+  trap release_locks EXIT
   resolve_navigation_branch
   export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
 
@@ -886,7 +908,7 @@ main() {
   elif [[ "$FORCE_REMOTE" == true ]]; then
     desired_mode="remote"
   elif [[ "$USE_PARENT" == true || "$USE_PREVIOUS" == true || \
-    "$USE_UP" == true ]]; then
+    "$USE_CHILD" == true ]]; then
     desired_mode="local"
   elif [[ "$has_local" == false ]]; then
     desired_mode="remote"
@@ -894,7 +916,7 @@ main() {
 
   if [[ "$USE_PREVIOUS" == true ]]; then
     stack_action="none"
-  elif [[ "$USE_UP" == true ]]; then
+  elif [[ "$USE_CHILD" == true ]]; then
     stack_action="pop:$CHILD_STACK_POP_COUNT"
   fi
 
