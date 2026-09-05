@@ -33,18 +33,19 @@ Arguments:
               uses the most recently selected branch name.
 
 Options:
-  -b          Change back to the previously selected branch. BRANCH is not
-              allowed with -b. Defaults to the local previous branch; use -r
-              to select the remote previous branch copy. This option is
-              mutually exclusive with -c, -f, and -p.
+  -b          Return to the previously selected branch. BRANCH is not
+              allowed with -b. If there is no such branch, stays on the
+              current branch. Use -r to select the remote previous branch
+              copy. This option is mutually exclusive with -c, -f, and -p.
   -c          Change to the last child branch used from the current branch.
               BRANCH is not allowed with -c. If no child branch is recorded,
               stays on the current branch. Use -r to select the remote child
               branch copy. This option is mutually exclusive with -b, -f,
               and -p.
-  -f          Change forward to the next branch. BRANCH is not allowed with -f.
-              Defaults to the local branch; use -r to select the remote branch
-              copy. This option is mutually exclusive with -b and -p.
+  -f          Return to the branch selected before using -b. BRANCH is not
+              allowed with -f. If there is no such branch, stays on the
+              current branch. Use -r to select the remote branch copy. This
+              option is mutually exclusive with -b and -p.
   -h, --help  Output this help to stdout and exit (other options and
               arguments are ignored).
   -l          Change to local BRANCH.
@@ -74,9 +75,9 @@ Notes:
     explaining why is output to stdout.
   - Protected branches, remote copies, and branches with invalid names are
     effectively read-only. chbranch prints a warning when one is selected.
-  - -b selects the previous branch; -f selects the next branch. Selecting a
-    different branch clears next-branch history. Reselecting the current
-    branch does not change history.
+  - -b returns to the previously selected branch; -f returns to the branch
+    selected before using -b. Selecting a different branch clears this
+    history. Reselecting the current branch does not change history.
   - -p selects the branch's parent. After a parent selection, -c returns to
     the last child used from that parent when one is available.
   - Changing branches does not modify repository history or the remote.
@@ -847,8 +848,10 @@ resolve_navigation_branch() {
   if [[ "$USE_BACK" == true ]]; then
     BRANCH_ARG="$(top_history_branch_or_empty "$BACK_STACK_KEY")"
     if [[ -z "$BRANCH_ARG" ]]; then
-      bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
-        "No previous branch is recorded"
+      BRANCH_ARG="$(current_branch_name_or_empty)"
+      [[ -n "$BRANCH_ARG" ]] || bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
+        "Current branch name cannot be resolved"
+      NAVIGATION_NOOP=true
     fi
     return 0
   fi
@@ -861,7 +864,7 @@ resolve_navigation_branch() {
     if [[ -z "$child_branch" ]] || \
       [[ "$(bt_resolve_parent_branch "$child_branch" "")" != "$base_branch" ]]; then
       BRANCH_ARG="$base_branch"
-      CHILD_SELECTION_NOOP=true
+      NAVIGATION_NOOP=true
       return 0
     fi
     BRANCH_ARG="$child_branch"
@@ -871,8 +874,10 @@ resolve_navigation_branch() {
   if [[ "$USE_FORWARD" == true ]]; then
     BRANCH_ARG="$(top_history_branch_or_empty "$FORWARD_STACK_KEY")"
     if [[ -z "$BRANCH_ARG" ]]; then
-      bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
-        "No next branch is recorded"
+      BRANCH_ARG="$(current_branch_name_or_empty)"
+      [[ -n "$BRANCH_ARG" ]] || bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
+        "Current branch name cannot be resolved"
+      NAVIGATION_NOOP=true
     fi
     return 0
   fi
@@ -950,7 +955,7 @@ main() {
   acquire_chbranch_lock
   trap release_locks EXIT
   RECORD_PARENT_CHILD=false
-  CHILD_SELECTION_NOOP=false
+  NAVIGATION_NOOP=false
   resolve_navigation_branch
   export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
 
@@ -1001,7 +1006,7 @@ main() {
 
   curr_branch="$(current_local_branch)"
   previous_selection_branch="$(current_branch_name_or_empty)"
-  if [[ "$CHILD_SELECTION_NOOP" == true ]]; then
+  if [[ "$NAVIGATION_NOOP" == true ]]; then
     emit_success_changed
     exit 0
   fi

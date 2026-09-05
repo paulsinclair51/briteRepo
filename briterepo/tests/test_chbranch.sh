@@ -158,11 +158,11 @@ assert_contains "[parent NAME]" "$TMPDIR/help.out"
 assert_contains "[parent unavailable NAME]" "$TMPDIR/help.out"
 assert_contains "-c          Change to the last child branch used from the current branch." \
   "$TMPDIR/help.out"
-assert_contains "-f          Change forward to the next branch." \
+assert_contains "-f          Return to the branch selected before using -b. BRANCH is not" \
   "$TMPDIR/help.out"
-assert_contains "-b selects the previous branch; -f selects the next branch." \
+assert_contains "-b returns to the previously selected branch; -f returns to the branch" \
   "$TMPDIR/help.out"
-assert_contains "different branch clears next-branch history. Reselecting the current" \
+assert_contains "selected before using -b. Selecting a different branch clears this" \
   "$TMPDIR/help.out"
 assert_contains "-p selects the branch's parent. After a parent selection, -c returns to" \
   "$TMPDIR/help.out"
@@ -254,13 +254,13 @@ assert_contains "A pushup operation is active" "$TMPDIR/pushup-locked.out"
   fail "pushup-locked chbranch must not change the current branch"
 pass "active pushup blocks chbranch"
 
-# Navigation target resolution failures use exit 3.
+# Parent navigation fails when the parent cannot be resolved.
 rc=$(run_in_work_capture "$TMPDIR/back-missing-history.out" -b)
-[[ "$rc" -eq 3 ]] || fail "-b without previous branch should exit 3 (got $rc)"
-assert_contains "No previous branch is recorded" "$TMPDIR/back-missing-history.out"
+[[ "$rc" -eq 0 ]] || fail "-b without prior branch should exit 0 (got $rc)"
+assert_contains "dev/local-only" "$TMPDIR/back-missing-history.out"
 rc=$(run_in_work_capture "$TMPDIR/forward-missing-history.out" -f)
-[[ "$rc" -eq 3 ]] || fail "-f without next branch should exit 3 (got $rc)"
-assert_contains "No next branch is recorded" "$TMPDIR/forward-missing-history.out"
+[[ "$rc" -eq 0 ]] || fail "-f without prior back should exit 0 (got $rc)"
+assert_contains "dev/local-only" "$TMPDIR/forward-missing-history.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-missing.out" -p main)
 [[ "$rc" -eq 3 ]] || fail "-p without parent should exit 3 (got $rc)"
 assert_contains "Parent branch could not be resolved for 'main'" \
@@ -479,8 +479,10 @@ rc=$(run_in_work_capture "$TMPDIR/history-back-again.out" -b)
 rc=$(run_in_work_capture "$TMPDIR/history-new-selection.out" v1.0.0)
 [[ "$rc" -eq 0 ]] || fail "new selection should exit 0 (got $rc)"
 rc=$(run_in_work_capture "$TMPDIR/history-forward-cleared.out" -f)
-[[ "$rc" -eq 3 ]] || fail "-f after new selection should exit 3 (got $rc)"
-assert_contains "No next branch is recorded" "$TMPDIR/history-forward-cleared.out"
+[[ "$rc" -eq 0 ]] || fail "-f after new selection should exit 0 (got $rc)"
+assert_contains "v1.0.0" "$TMPDIR/history-forward-cleared.out"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "v1.0.0" ]] || \
+  fail "-f after new selection should remain on the current branch"
 rc=$(run_in_work_capture "$TMPDIR/history-restore-local.out" dev/local-only)
 [[ "$rc" -eq 0 ]] || fail "history restore local should exit 0 (got $rc)"
 pass "back and forward branch navigation"
