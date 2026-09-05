@@ -1,0 +1,20 @@
+--- briteRepo workflow ---
+Workflow-Type: push
+Workflow-Time: 2026-09-05 23:04:39+00:00
+Workflow-Branch: dev/release-v1.0.0
+Workflow-User: Paul Sinclair <paulsinclair@verizon.net>
+Command-Line: pushup -o
+Summary: Pushed 4 commit(s) to origin/dev/release-v1.0.0
+Authority: owner
+Command-Source: user
+Previous-Remote-Tip: 53b16241d874173ebbf9575e4797dbe871c41f50
+Pushed-Tip: HEAD
+Commits: 4
+Files-Modified: 0
+Files-Deleted: 0
+Files-Added: 0
+Files-Renamed: 0
+Files-Renamed-Modified: 0
+Directories-Deleted: 0
+Directories-Added: 0
+Directories-Renamed: 0
