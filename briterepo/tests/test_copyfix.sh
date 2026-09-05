@@ -456,6 +456,12 @@ grep -Fq "**Branch:** \`dev/conflict-target-v1.0.0\`" "$error_report" || \
   fail "error report should belong to the current target branch"
 grep -Fq '**Exit Code:** 5' "$error_report" || \
   fail "error report should include the conflict exit code"
+grep -Fq '<summary>Unresolved files</summary>' "$error_report" || \
+  fail "error report should include a collapsible unresolved-files section"
+grep -Fq '| `README.md` | unresolved conflict |' "$error_report" || \
+  fail "error report should list the unresolved file"
+grep -Fq "See reports/copyfix-e-" "$TMPDIR/conflict.out" || \
+  fail "conflict output should point to the error report"
 
 set +e
 (
@@ -493,6 +499,31 @@ set +e
 rc=$?
 set -e
 [[ "$rc" -eq 5 ]] || fail "recreated conflict should exit 5 (got $rc)"
+state_dir="$(git -C "$WORK" rev-parse --path-format=absolute --git-common-dir)/briteRepo-copyfix-state/dev/conflict-target-v1.0.0"
+error_report="$(latest_report 'copyfix-e-*.md')"
+printf '\n' > "$state_dir/source"
+set +e
+(
+  cd "$WORK"
+  bash ./briterepo/bin/copyfix
+) >"$TMPDIR/corrupt-state.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]] || \
+  fail "incomplete copyfix state should exit 2 (got $rc)"
+grep -Fq "Copyfix state is incomplete" "$TMPDIR/corrupt-state.out" || \
+  fail "incomplete copyfix state should be reported"
+git -C "$WORK" cherry-pick --abort >/dev/null 2>&1
+rm -rf "$state_dir" "$state_dir.lock"
+set +e
+(
+  cd "$WORK"
+  bash ./briterepo/bin/copyfix fix/conflict-v1.0.0
+) >"$TMPDIR/conflict-recreated.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 5 ]] || \
+  fail "recreated conflict should exit 5 after state validation (got $rc)"
 state_dir="$(git -C "$WORK" rev-parse --path-format=absolute --git-common-dir)/briteRepo-copyfix-state/dev/conflict-target-v1.0.0"
 error_report="$(latest_report 'copyfix-e-*.md')"
 printf 'resolved conflict\n' > "$WORK/README.md"
