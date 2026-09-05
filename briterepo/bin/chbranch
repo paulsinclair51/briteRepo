@@ -13,10 +13,10 @@ usage() {
 Usage:
   chbranch [-l | -r] [-p] [-t SEC] [-v] [BRANCH]
   chbranch [-l | -r] -b [-t SEC] [-v]
-  chbranch [-l | -r] -u [-t SEC] [-v]
+  chbranch [-l | -r] -c [-t SEC] [-v]
   chbranch {-h | --help}
 
-Change current branch to BRANCH.
+Change current branch based on arguments and options provided.
 
 Prerequisites:
   - The current branch must not have any uncommitted changes except when
@@ -35,7 +35,11 @@ Options:
   -b          Change back to the previously selected branch. BRANCH is not
               allowed with -b. Defaults to the local previous branch; use -r
               to select the remote previous branch copy.
-              This option is mutually exclusive with -u and -p.
+              This option is mutually exclusive with -c and -p.
+  -c          Change to the most recently selected child branch. BRANCH is not
+              allowed with -c. Defaults to the local stacked branch; use -r
+              to select the remote stacked branch copy.
+              This option is mutually exclusive with -b and -p.
   -h, --help  Output this help to stdout and exit (other options and
               arguments are ignored).
   -l          Change to local BRANCH.
@@ -47,10 +51,6 @@ Options:
               reachable. This option is mutually exclusive with -l.
   -t SEC      Timeout in seconds for accessing remote branch (default
               10 seconds). SEC must be an integer greater than 0.
-  -u          Change up to the previous branch in the current branch stack.
-              BRANCH is not allowed with -u. Defaults to the local stacked
-              branch; use -r to select the remote stacked branch copy.
-              This option is mutually exclusive with -b and -p.
   -v          Output verbose progress and diagnostics to stdout.
 
 If neither -l nor -r is specified, changes to local BRANCH when it exists;
@@ -71,7 +71,7 @@ Notes:
     effectively read-only. chbranch prints a warning when one is selected.
   - Undo accidental changes to a read-only branch before changing to another
     branch. To make changes, switch to a local contributor or targeted branch
-    create one first using mkbranch if it doesn't exist).
+    (create one first using mkbranch if it doesn't exist).
 
 Examples:
   chbranch dev/my-feature-v1.0.0
@@ -695,7 +695,7 @@ parse_args() {
       -b)
         USE_PREVIOUS=true
         ;;
-      -u)
+      -c)
         USE_UP=true
         ;;
       -t)
@@ -733,13 +733,13 @@ parse_args() {
   if [[ "$USE_PARENT" == true && "$USE_PREVIOUS" == true ]] || \
     [[ "$USE_PARENT" == true && "$USE_UP" == true ]] || \
     [[ "$USE_PREVIOUS" == true && "$USE_UP" == true ]]; then
-    arg_error "Options -p, -b, and -u are mutually exclusive"
+    arg_error "Options -p, -b, and -c are mutually exclusive"
   fi
   if [[ "$USE_PREVIOUS" == true && -n "$BRANCH_ARG" ]]; then
     arg_error "BRANCH is not allowed with -b"
   fi
   if [[ "$USE_UP" == true && -n "$BRANCH_ARG" ]]; then
-    arg_error "BRANCH is not allowed with -u"
+    arg_error "BRANCH is not allowed with -c"
   fi
 
 }
