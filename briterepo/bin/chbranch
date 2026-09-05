@@ -557,17 +557,7 @@ fetch_remote_branch_ref() {
 refresh_remote_branch_ref() {
   local branch="$1"
 
-  fetch_remote_branch_ref "$branch" || return $?
-
-  # Remote workflow history is independent of local workflow history. A
-  # missing notes ref is valid when no remote-modifying command has run yet.
-  if ! bt_run_remote_command git fetch origin \
-    "+refs/notes/briteRepo-remote-workflow:refs/notes/briteRepo-remote-workflow" \
-    >/dev/null 2>&1; then
-    verbose_info "Remote workflow history is unavailable; branch selection continues."
-  fi
-
-  return 0
+  fetch_remote_branch_ref "$branch"
 }
 
 ensure_remote_ref_available() {
