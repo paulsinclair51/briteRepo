@@ -115,7 +115,10 @@ review and feedback. Use the release script to publish a release.
 
 ### 1.3. Requirements
 
-bash, github.
+Bash 4.4 or later, github.
+
+macOS ships Bash 3.2 by default; install a newer Bash (for example, with
+Homebrew) before using briteRepo.
 </details>
 
 <details>

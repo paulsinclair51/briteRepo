@@ -9,6 +9,9 @@
 # SPDX-License-Identifier: MIT
 # For license details, see '<repo>/LICENSE'.
 
+# shellcheck disable=SC1091,SC2317  # Helper source paths and trap-managed
+# lock cleanup paths.
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -132,9 +135,6 @@ EOF
 # - Write local reports only for dry-run/error paths; clean stale transient
 #   reports after successful work.
 # - Direct successful runs to report, which reads the durable commit metadata.
-
-# shellcheck disable=SC1091,SC2317  # Helper source paths and trap-managed lock
-# cleanup paths.
 
 set -euo pipefail
 
@@ -319,7 +319,7 @@ EOF
     while IFS= read -r file_path; do
       [[ -n "$file_path" ]] || continue
       local stats
-      stats="$(get_stats_for_file "$file_path" "$COMMIT_STATS_FILE")"
+      stats="$(get_stats_for_file "$file_path")"
       local added removed
       added="${stats%%$'\t'*}"
       removed="${stats#*$'\t'}"
@@ -402,7 +402,10 @@ COMMITTED_FILES=0
 NEEDS_COMMIT=false
 COMMIT_FILE_LIST=""
 COMMIT_STATS_FILE="$(mktemp)"
-COMMIT_ACTIONS_FILE="$(mktemp)"
+declare -A COMMIT_STATS_ADDED=()
+declare -A COMMIT_STATS_REMOVED=()
+declare -A COMMIT_TOTAL_LINES=()
+declare -A COMMIT_NOTES=()
 COMMIT_MODIFIED_FILES=0
 COMMIT_ADDED_FILES=0
 COMMIT_DELETED_FILES=0
@@ -434,7 +437,7 @@ cleanup_runtime_files() {
   if [[ "$COMMIT_WORK_LOCK_HELD" == true ]]; then
     release_commit_work_lock || true
   fi
-  rm -f "$COMMIT_STATS_FILE" "$COMMIT_ACTIONS_FILE"
+  rm -f "$COMMIT_STATS_FILE"
 }
 
 trap cleanup_runtime_files EXIT
@@ -776,28 +779,61 @@ collect_commit_file_stats() {
 
   [[ -n "$COMMIT_FILE_LIST" ]] || return 0
 
-  printf '%s\n' "$COMMIT_FILE_LIST" | while IFS= read -r file_path; do
+  # A single whole-tree numstat call replaces one `git diff` invocation per
+  # candidate file. Records are NUL-delimited so rename entries (whose
+  # numeric fields are followed by separate old/new NUL fields instead of
+  # a combined "old => new" string) can be parsed unambiguously.
+  local numstat_tmp
+  numstat_tmp="$(mktemp)"
+  git diff --numstat -z HEAD >"$numstat_tmp" 2>/dev/null || true
+
+  local -A stats_added=()
+  local -A stats_removed=()
+  local added="" removed="" path="" old_path=""
+
+  exec 4<"$numstat_tmp"
+  while IFS=$'\t' read -r -d '' added removed path <&4; do
+    if [[ -z "$path" ]]; then
+      IFS= read -r -d '' old_path <&4 || old_path=""
+      IFS= read -r -d '' path <&4 || path=""
+    fi
+    [[ -n "$path" ]] || continue
+    [[ "$added" =~ ^[0-9]+$ ]] || added=0
+    [[ "$removed" =~ ^[0-9]+$ ]] || removed=0
+    stats_added["$path"]="$added"
+    stats_removed["$path"]="$removed"
+  done
+  exec 4<&-
+  rm -f "$numstat_tmp"
+
+  local file_path file_added file_removed
+
+  # Process substitution (not a pipe) so the cache arrays populated below
+  # persist in the caller's shell instead of a subshell.
+  while IFS= read -r file_path; do
     [[ -n "$file_path" ]] || continue
 
-    local added="0"
-    local removed="0"
-    local stats_line=""
+    file_added="${stats_added[$file_path]:-}"
+    file_removed="${stats_removed[$file_path]:-0}"
 
-    stats_line="$(git diff --numstat HEAD -- "$file_path" 2>/dev/null || true)"
-    if [[ -n "$stats_line" ]]; then
-      added="$(printf '%s\n' "$stats_line" | \
-        awk '{ if ($1 ~ /^[0-9]+$/) s+=$1 } END { print s+0 }')"
-      removed="$(printf '%s\n' "$stats_line" | \
-        awk '{ if ($2 ~ /^[0-9]+$/) s+=$2 } END { print s+0 }')"
-    elif [[ -f "$file_path" ]] && \
-      ! git cat-file -e "HEAD:$file_path" >/dev/null 2>&1; then
-      added="$(wc -l < "$file_path" | tr -d ' ')"
-      removed="0"
+    if [[ -z "$file_added" ]]; then
+      if [[ -f "$file_path" ]] && \
+        ! git cat-file -e "HEAD:$file_path" >/dev/null 2>&1; then
+        file_added="$(wc -l < "$file_path" | tr -d ' ')"
+        file_removed="0"
+      else
+        file_added="0"
+        file_removed="0"
+      fi
     fi
 
-    printf '%s\t%s\t%s\n' "$file_path" "$added" "$removed" \
+    COMMIT_STATS_ADDED["$file_path"]="$file_added"
+    COMMIT_STATS_REMOVED["$file_path"]="$file_removed"
+    COMMIT_TOTAL_LINES["$file_path"]="$(get_total_lines_for_file "$file_path")"
+
+    printf '%s\t%s\t%s\n' "$file_path" "$file_added" "$file_removed" \
       >> "$COMMIT_STATS_FILE"
-  done
+  done < <(printf '%s\n' "$COMMIT_FILE_LIST")
 }
 
 collect_commit_candidate_files() {
@@ -899,17 +935,9 @@ format_command_line() {
 
 get_stats_for_file() {
   local file_path="$1"
-  local stats_file="$2"
 
-  local stats_line
-  stats_line="$(awk -F '\t' -v f="$file_path" '$1 == f { print $0; exit }' \
-    "$stats_file" 2>/dev/null || true)"
-  if [[ -z "$stats_line" ]]; then
-    printf '0\t0\n'
-    return 0
-  fi
-
-  printf '%s\n' "$stats_line" | awk -F '\t' '{ printf "%s\t%s\n", $2, $3 }'
+  printf '%s\t%s\n' "${COMMIT_STATS_ADDED[$file_path]:-0}" \
+    "${COMMIT_STATS_REMOVED[$file_path]:-0}"
 }
 
 collect_commit_line_totals() {
@@ -1064,15 +1092,6 @@ write_commit_report_row() {
     "$net" "$total_lines" "$notes_cell" >> "$out_file"
 }
 
-# "1 total file." or "N total files."
-format_total_files_text() {
-  if [[ "$COMMITTED_FILES" -eq 1 ]]; then
-    printf '1 total file.'
-  else
-    printf '%s total files.' "$COMMITTED_FILES"
-  fi
-}
-
 append_commit_table_header() {
   cat >> "$REPORT_FILE" <<'EOF'
 | **File** | **Added** | **Deleted** | **Net** | **Lines** | **Action** |
@@ -1148,7 +1167,9 @@ append_commit_directories_section() {
 get_total_lines_for_file() {
   local file_path="$1"
 
-  if [[ -f "$file_path" ]]; then
+  if [[ -n "${COMMIT_TOTAL_LINES[$file_path]:-}" ]]; then
+    printf '%s' "${COMMIT_TOTAL_LINES[$file_path]}"
+  elif [[ -f "$file_path" ]]; then
     wc -l < "$file_path" | tr -d ' '
   else
     printf ''
@@ -1157,11 +1178,8 @@ get_total_lines_for_file() {
 
 build_commit_note() {
   local file_path="$1"
-  local action
 
-  action="$(awk -F '\t' -v f="$file_path" '$1 == f { print $2; exit }' \
-    "$COMMIT_ACTIONS_FILE" 2>/dev/null || true)"
-  printf '%s\n' "${action:-Modified}"
+  printf '%s\n' "${COMMIT_NOTES[$file_path]:-Modified}"
 }
 
 format_file_change_summary() {
@@ -1247,7 +1265,7 @@ record_commit_action() {
   local action="$2"
 
   [[ -n "$file_path" ]] || return 0
-  printf '%s\t%s\n' "$file_path" "$action" >> "$COMMIT_ACTIONS_FILE"
+  COMMIT_NOTES["$file_path"]="$action"
 }
 
 # Working-tree status letters mapped to the report action.
@@ -1321,7 +1339,7 @@ generate_commit_report() {
     while IFS= read -r file_path; do
       [[ -n "$file_path" ]] || continue
       local stats
-      stats="$(get_stats_for_file "$file_path" "$COMMIT_STATS_FILE")"
+      stats="$(get_stats_for_file "$file_path")"
       local added removed
       added="${stats%%$'\t'*}"
       removed="${stats#*$'\t'}"
@@ -1445,8 +1463,8 @@ fi
 if ! is_contributor_or_higher "$ACTOR_LOGIN"; then
   bt_emit_prerequisite_failure "$EXIT_NOT_AUTHORIZED" \
     "$(printf '%s%s' \
-      "User '$ACTOR_LOGIN' is not authorized to run commit (requires " \
-      "contributor role or higher)")" \
+      "User '$ACTOR_LOGIN' is not listed as a contributor, reviewer, or " \
+      "approver and is not authorized to run commit.")" \
     "contact an approver or repository owner"
 fi
 
@@ -1460,6 +1478,11 @@ if [[ "$CURRENT_BRANCH_MODE" != "local" ]]; then
     "and retry")"
 fi
 
+initialize_commit_work_lock_paths "$CURRENT_BRANCH"
+acquire_commit_work_lock
+
+# Checked after acquiring the lock so a workflow started by another process
+# in between the check and the lock cannot slip past this guard.
 active_workflow="$(bt_git_workflow_in_progress_action "$CURRENT_BRANCH")"
 if [[ -n "$active_workflow" ]]; then
   if [[ "$active_workflow" == copyfix ]]; then
@@ -1475,9 +1498,6 @@ elif bt_git_is_rebase_in_progress; then
     "A pull operation is in progress on '$CURRENT_BRANCH'." \
     "resolve conflicts and rerun pull."
 fi
-
-initialize_commit_work_lock_paths "$CURRENT_BRANCH"
-acquire_commit_work_lock
 
 # Determine commit candidates before validating comment.
 collect_commit_candidate_files

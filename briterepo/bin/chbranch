@@ -396,11 +396,10 @@ remember_child_for_parent() {
   local child="$2"
   local mapping=""
   local mapping_parent=""
-  local mapped_child=""
   local -a retained_mappings=()
 
   while IFS= read -r mapping; do
-    IFS=$'\t' read -r mapping_parent mapped_child <<< "$mapping"
+    mapping_parent="${mapping%%$'\t'*}"
     [[ "$mapping_parent" == "$parent" ]] && continue
     retained_mappings+=("$mapping")
   done < <(git config --local --get-all "$LAST_CHILD_KEY" 2>/dev/null || true)
@@ -992,7 +991,6 @@ main() {
   local curr_branch
   local previous_remote_copy=""
   local previous_selection_branch=""
-  local refreshing_remote_copy=false
   local stack_action="new"
   local msg=""
 
@@ -1061,10 +1059,6 @@ main() {
   fi
   if is_remote_copy_branch "$curr_branch"; then
     previous_remote_copy="$curr_branch"
-    if [[ "$FORCE_REMOTE" == true && \
-      "$TARGET_BRANCH" == "${curr_branch#r-}" ]]; then
-      refreshing_remote_copy=true
-    fi
   fi
   if [[ "$desired_mode" == "local" && "$detach_local" == false && \
     "$curr_branch" == "$TARGET_BRANCH" ]]; then

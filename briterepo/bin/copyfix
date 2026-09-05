@@ -350,6 +350,26 @@ EOF
   finish_report_write
 }
 
+format_unresolved_files_detail() {
+  local -a unresolved_paths=()
+  local path=""
+
+  mapfile -d '' -t unresolved_paths < <(
+    git diff --name-only --diff-filter=U -z 2>/dev/null
+  )
+  [[ ${#unresolved_paths[@]} -gt 0 ]] || return 0
+
+  printf '\n<details>\n<summary>Unresolved files</summary>\n\n'
+  printf '| **File** | **Status** |\n| --- | --- |\n'
+  for path in "${unresolved_paths[@]}"; do
+    path="${path//$'\r'/ }"
+    path="${path//$'\n'/ }"
+    path="${path//|/\\|}"
+    printf '| `%s` | unresolved conflict |\n' "$path"
+  done
+  printf '\n</details>\n'
+}
+
 generate_error_report() {
   local message="$1"
   local code="$2"
@@ -357,6 +377,7 @@ generate_error_report() {
 
   ERROR_REPORT_IN_PROGRESS=true
   printf -v detail '**Exit Code:** %s\n\n**Error:** %s' "$code" "$message"
+  detail+="$(format_unresolved_files_detail)"
   generate_copyfix_report "copyfix-e" "$TARGET_BRANCH" "Failed" "error" \
     "$detail"
   ERROR_REPORT_IN_PROGRESS=false
@@ -532,12 +553,12 @@ copy_commits() {
   local commits_are_oldest_first="${2:-false}"
   local commit=""
   local remaining_commits=""
-  
+
   if [[ -z "$commits" ]]; then
     bt_warn "No new commits to copy from source branch"
     return 0
   fi
-  
+
   # Convert to array and reverse so copy runs oldest first.
   local commit_array=()
   local reversed=()
@@ -549,15 +570,15 @@ copy_commits() {
       reversed+=("${commit_array[$i]}")
     done
   fi
-  
+
   bt_info "Copying ${#reversed[@]} commit(s)..."
-  
+
   for ((i=0; i<${#reversed[@]}; i++)); do
     commit="${reversed[$i]}"
     bt_info "Copying $commit..."
-    
+
     if ! git cherry-pick "$commit" 2>&1; then
-      conflict_msg=""
+      local conflict_msg=""
 
       if [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]]; then
         remaining_commits="$(printf '%s\n' "${reversed[@]:$((i + 1))}")"
@@ -567,6 +588,8 @@ copy_commits() {
         generate_error_report "$conflict_msg" "$EXIT_CONFLICTS" || true
         bt_warn "Conflict detected while copying $commit"
         echo "Resolve the conflicting files in the current branch."
+        [[ -z "$REPORT_FILE" || ! -f "$REPORT_FILE" ]] || \
+          echo "See ${REPORT_FILE#"$REPO_ROOT"/} for the unresolved file list."
         echo "Then run:"
         echo "  copyfix"
         exit "$EXIT_CONFLICTS"
@@ -715,6 +738,23 @@ if [[ "$CONTINUE_MODE" == true ]]; then
     "$COPYFIX_STATE_DIR/directories-added" 2>/dev/null || echo 0)"
   DIRECTORIES_RENAMED="$(cat \
     "$COPYFIX_STATE_DIR/directories-renamed" 2>/dev/null || echo 0)"
+  if [[ -z "$SOURCE_BRANCH" || -z "$TARGET_BRANCH" || \
+    -z "$COPYFIX_BEFORE_TIP" ]]; then
+    bt_error_exit "$EXIT_OPERATION_FAILED" \
+      "Copyfix state is incomplete and cannot be continued" \
+      "remove the incomplete state and rerun copyfix from the target branch."
+  fi
+  if ! [[ "$FILES_MODIFIED" =~ ^[0-9]+$ && \
+    "$FILES_ADDED" =~ ^[0-9]+$ && "$FILES_DELETED" =~ ^[0-9]+$ && \
+    "$FILES_RENAMED" =~ ^[0-9]+$ && \
+    "$FILES_RENAMED_MODIFIED" =~ ^[0-9]+$ && \
+    "$DIRECTORIES_DELETED" =~ ^[0-9]+$ && \
+    "$DIRECTORIES_ADDED" =~ ^[0-9]+$ && \
+    "$DIRECTORIES_RENAMED" =~ ^[0-9]+$ ]]; then
+    bt_error_exit "$EXIT_OPERATION_FAILED" \
+      "Copyfix state contains invalid file or directory counts" \
+      "remove the incomplete state and rerun copyfix from the target branch."
+  fi
   BT_CHANGE_MODIFIED_FILES="$FILES_MODIFIED"
   BT_CHANGE_DELETED_FILES="$FILES_DELETED"
   BT_CHANGE_ADDED_FILES="$FILES_ADDED"

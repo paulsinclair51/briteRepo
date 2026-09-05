@@ -128,10 +128,12 @@ Run any command with `-h` for current usage, prerequisites, and exit statuses.
 
 ### 2.1. Set Up Your Clone
 
-All `briteRepo` commands require Bash and standard POSIX utilities. On Linux
-and macOS, run them from a Bash-compatible terminal. On Windows, use WSL, Git
-Bash, or MSYS2. Native Command Prompt and PowerShell do not run these scripts
-directly, but they can launch a script through an installed `bash` executable.
+All `briteRepo` commands require Bash 4.4 or later and standard POSIX
+utilities. On Linux and macOS, run them from a Bash-compatible terminal. On
+Windows, use WSL, Git Bash, or MSYS2. Native Command Prompt and PowerShell do
+not run these scripts directly, but they can launch a script through an
+installed `bash` executable. macOS ships Bash 3.2 by default, so install a
+newer Bash (for example, with Homebrew) before running these commands.
 
 briteRepo is installed once per user account, separately from any
 repository you use it to manage. If it is not already installed, see
