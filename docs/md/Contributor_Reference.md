@@ -156,7 +156,7 @@ information, run any script with `-h` or `--help`.
 ```bash
 chbranch [-l | -r] [-p] [-t SEC] [-v] [BRANCH]
 chbranch [-l | -r] -b [-t SEC] [-v]
-chbranch [-l | -r] -c [-t SEC] [-v]
+chbranch [-l | -r] -f [-t SEC] [-v]
 ```
 
 **Notes:**
@@ -166,13 +166,12 @@ chbranch [-l | -r] -c [-t SEC] [-v]
   copy of an existing remote branch.
 - `-p` selects the parent of the current branch, or the parent of `BRANCH` when
   a branch is supplied. It selects the local parent by default; use `-r` for the
-  remote parent copy. It is mutually exclusive with `-b` and `-c`.
-- `-b` returns to the previously selected branch. `BRANCH` is not allowed with
-  `-b`. It selects the local previous branch by default; use `-r` for the remote
-  previous branch copy.
-- `-c` selects the most recently selected child branch from the current branch
-  stack. `BRANCH` is not allowed with `-c`. It selects the local stacked branch
-  by default; use `-r` for the remote stacked branch copy.
+  remote parent copy. It is mutually exclusive with `-b` and `-f`.
+- `-b` selects the previous branch. `BRANCH` is not allowed with `-b`. Use `-r`
+  for the remote branch copy.
+- `-f` selects the next branch. `BRANCH` is not allowed with `-f`. Use `-r` for
+  the remote branch copy. Selecting a different branch clears next-branch
+  history.
 - Local protected branches are updated only when they can safely match their
   remote copy. Protected branches and remote copies are read-only.
 </details>

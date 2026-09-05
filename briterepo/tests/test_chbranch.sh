@@ -156,11 +156,11 @@ assert_contains "[retarget in progress]" "$TMPDIR/help.out"
 assert_contains "[pulldown in progress]" "$TMPDIR/help.out"
 assert_contains "[parent NAME]" "$TMPDIR/help.out"
 assert_contains "[parent unavailable NAME]" "$TMPDIR/help.out"
-assert_contains "-c          Change to the most recently selected branch in the child stack." \
+assert_contains "-f          Change forward to the next branch." \
   "$TMPDIR/help.out"
-assert_contains "-b returns to the immediately previous branch. -c follows the selection" \
+assert_contains "-b selects the previous branch; -f selects the next branch." \
   "$TMPDIR/help.out"
-assert_contains "history below the current branch; use -p to select the branch's parent." \
+assert_contains "Selecting a different branch clears next" \
   "$TMPDIR/help.out"
 assert_matches '^[[:space:]]*3[[:space:]]+Branch not found, no previous branch is recorded, no branch stack entry$' \
   "$TMPDIR/help.out"
@@ -196,15 +196,15 @@ assert_contains "mutually exclusive" "$TMPDIR/mutually-exclusive.out"
 rc=$(run_in_work_capture "$TMPDIR/back-with-branch.out" -b dev/target)
 [[ "$rc" -eq 1 ]] || fail "-b with branch should exit 1 (got $rc)"
 assert_contains "BRANCH is not allowed with -b" "$TMPDIR/back-with-branch.out"
-rc=$(run_in_work_capture "$TMPDIR/child-with-branch.out" -c dev/target)
-[[ "$rc" -eq 1 ]] || fail "-c with branch should exit 1 (got $rc)"
-assert_contains "BRANCH is not allowed with -c" "$TMPDIR/child-with-branch.out"
+rc=$(run_in_work_capture "$TMPDIR/forward-with-branch.out" -f dev/target)
+[[ "$rc" -eq 1 ]] || fail "-f with branch should exit 1 (got $rc)"
+assert_contains "BRANCH is not allowed with -f" "$TMPDIR/forward-with-branch.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-with-back.out" -p -b)
 [[ "$rc" -eq 1 ]] || fail "-p with -b should exit 1 (got $rc)"
 assert_contains "mutually exclusive" "$TMPDIR/parent-with-back.out"
-rc=$(run_in_work_capture "$TMPDIR/parent-with-child.out" -p -c)
-[[ "$rc" -eq 1 ]] || fail "-p with -c should exit 1 (got $rc)"
-assert_contains "mutually exclusive" "$TMPDIR/parent-with-child.out"
+rc=$(run_in_work_capture "$TMPDIR/parent-with-forward.out" -p -f)
+[[ "$rc" -eq 1 ]] || fail "-p with -f should exit 1 (got $rc)"
+assert_contains "mutually exclusive" "$TMPDIR/parent-with-forward.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-invalid-branch.out" -p 'bad..branch')
 [[ "$rc" -eq 1 ]] || fail "-p invalid branch should exit 1 (got $rc)"
 assert_contains "Invalid branch name" "$TMPDIR/parent-invalid-branch.out"
@@ -248,9 +248,9 @@ pass "active pushup blocks chbranch"
 rc=$(run_in_work_capture "$TMPDIR/back-missing-history.out" -b)
 [[ "$rc" -eq 3 ]] || fail "-b without previous branch should exit 3 (got $rc)"
 assert_contains "No previous branch is recorded" "$TMPDIR/back-missing-history.out"
-rc=$(run_in_work_capture "$TMPDIR/child-missing-history.out" -c)
-[[ "$rc" -eq 3 ]] || fail "-c without branch stack should exit 3 (got $rc)"
-assert_contains "No branch stack entry is recorded" "$TMPDIR/child-missing-history.out"
+rc=$(run_in_work_capture "$TMPDIR/forward-missing-history.out" -f)
+[[ "$rc" -eq 3 ]] || fail "-f without next branch should exit 3 (got $rc)"
+assert_contains "No next branch is recorded" "$TMPDIR/forward-missing-history.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-missing.out" -p main)
 [[ "$rc" -eq 3 ]] || fail "-p without parent should exit 3 (got $rc)"
 assert_contains "Parent branch could not be resolved for 'main'" \
@@ -284,22 +284,23 @@ assert_contains "dev/local-only" \
   fail "successful selection should not write to stderr"
 pass "current local branch"
 
-# Reselecting the current local branch must not alter -b or -c history.
+# Reselecting the current local branch must not alter back or next history.
 (
   cd "$WORK"
-  git config --local chbranch.previousBranch main
-  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
-  git config --local --add chbranch.branchStack v1.0.0
-  git config --local --add chbranch.branchStack main
+  git config --local --unset-all chbranch.backStack >/dev/null 2>&1 || true
+  git config --local --unset-all chbranch.forwardStack >/dev/null 2>&1 || true
+  git config --local --add chbranch.backStack v1.0.0
+  git config --local --add chbranch.backStack main
+  git config --local --add chbranch.forwardStack dev/target
 )
-local_previous_before="$(git -C "$WORK" config --local --get chbranch.previousBranch)"
-local_stack_before="$(git -C "$WORK" config --local --get-all chbranch.branchStack)"
+local_back_before="$(git -C "$WORK" config --local --get-all chbranch.backStack)"
+local_forward_before="$(git -C "$WORK" config --local --get-all chbranch.forwardStack)"
 rc=$(run_in_work_capture "$TMPDIR/current-local-history.out" dev/local-only)
 [[ "$rc" -eq 0 ]] || fail "current local history check should exit 0 (got $rc)"
-[[ "$(git -C "$WORK" config --local --get chbranch.previousBranch)" == \
-  "$local_previous_before" ]] || fail "same local branch should preserve previous branch"
-[[ "$(git -C "$WORK" config --local --get-all chbranch.branchStack)" == \
-  "$local_stack_before" ]] || fail "same local branch should preserve branch stack"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.backStack)" == \
+  "$local_back_before" ]] || fail "same local branch should preserve back history"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.forwardStack)" == \
+  "$local_forward_before" ]] || fail "same local branch should preserve next history"
 pass "same local branch preserves navigation history"
 
 (
@@ -351,7 +352,12 @@ assert_contains "[remote copy]" "$TMPDIR/parent-remote.out"
 )
 pass "parent navigation"
 
-# -b returns to the previously selected branch and defaults to local mode.
+# -b selects the previous branch; -f returns to the next branch.
+(
+  cd "$WORK"
+  git config --local --unset-all chbranch.backStack >/dev/null 2>&1 || true
+  git config --local --unset-all chbranch.forwardStack >/dev/null 2>&1 || true
+)
 rc=$(run_in_work_capture "$TMPDIR/back-setup-local.out" dev/target)
 [[ "$rc" -eq 0 ]] || fail "back setup local should exit 0 (got $rc)"
 rc=$(run_in_work_capture "$TMPDIR/back-local.out" -b)
@@ -359,82 +365,52 @@ rc=$(run_in_work_capture "$TMPDIR/back-local.out" -b)
 assert_contains "dev/local-only" "$TMPDIR/back-local.out"
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
   fail "-b should select the previous local branch"
-rc=$(run_in_work_capture "$TMPDIR/back-remote.out" -r -b)
-[[ "$rc" -eq 0 ]] || fail "-r -b should exit 0 (got $rc)"
-assert_contains "dev/target" "$TMPDIR/back-remote.out"
-assert_contains "[remote copy]" "$TMPDIR/back-remote.out"
+rc=$(run_in_work_capture "$TMPDIR/forward-remote.out" -r -f)
+[[ "$rc" -eq 0 ]] || fail "-r -f should exit 0 (got $rc)"
+assert_contains "dev/target" "$TMPDIR/forward-remote.out"
+assert_contains "[remote copy]" "$TMPDIR/forward-remote.out"
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "r-dev/target" ]] || \
-  fail "-r -b should select the remote previous branch copy"
+  fail "-r -f should select the remote next branch copy"
 rc=$(run_in_work_capture "$TMPDIR/back-restore-local.out" dev/local-only)
 [[ "$rc" -eq 0 ]] || fail "back restore local should exit 0 (got $rc)"
-pass "previous branch navigation"
+pass "previous and next branch navigation"
 
-# -c returns to child branches, while -b remains a two-branch toggle.
+# -b and -f navigate previous and next branch history.
 (
   cd "$WORK"
-  git config --local --unset-all chbranch.previousBranch >/dev/null 2>&1 || true
-  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
+  git config --local --unset-all chbranch.backStack >/dev/null 2>&1 || true
+  git config --local --unset-all chbranch.forwardStack >/dev/null 2>&1 || true
 )
-rc=$(run_in_work_capture "$TMPDIR/child-stack-b.out" dev/target)
-[[ "$rc" -eq 0 ]] || fail "child stack b setup should exit 0 (got $rc)"
-rc=$(run_in_work_capture "$TMPDIR/child-stack-c.out" main)
-[[ "$rc" -eq 0 ]] || fail "child stack c setup should exit 0 (got $rc)"
-rc=$(run_in_work_capture "$TMPDIR/child-stack-first.out" -c)
-[[ "$rc" -eq 0 ]] || fail "first -c should exit 0 (got $rc)"
-assert_contains "dev/target" "$TMPDIR/child-stack-first.out"
+rc=$(run_in_work_capture "$TMPDIR/history-a.out" dev/target)
+[[ "$rc" -eq 0 ]] || fail "history setup a should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/history-b.out" main)
+[[ "$rc" -eq 0 ]] || fail "history setup b should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/history-back-first.out" -b)
+[[ "$rc" -eq 0 ]] || fail "first -b should exit 0 (got $rc)"
+assert_contains "dev/target" "$TMPDIR/history-back-first.out"
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/target" ]] || \
-  fail "first -c should select the previous branch in the stack"
-rc=$(run_in_work_capture "$TMPDIR/child-stack-back.out" -b)
-[[ "$rc" -eq 0 ]] || fail "-b after -c should exit 0 (got $rc)"
-assert_contains "main" "$TMPDIR/child-stack-back.out"
-[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "main" ]] || \
-  fail "-b after -c should toggle back to the branch left by -c"
-rc=$(run_in_work_capture "$TMPDIR/child-stack-second.out" -c)
-[[ "$rc" -eq 0 ]] || fail "second -c should exit 0 (got $rc)"
-assert_contains "dev/local-only" "$TMPDIR/child-stack-second.out"
+  fail "first -b should select the previous branch"
+rc=$(run_in_work_capture "$TMPDIR/history-back-second.out" -b)
+[[ "$rc" -eq 0 ]] || fail "second -b should exit 0 (got $rc)"
+assert_contains "dev/local-only" "$TMPDIR/history-back-second.out"
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
-  fail "second -c should continue through the branch stack"
-pass "child branch stack navigation"
-
-# -c skips a stack entry for the current branch left behind by -b.
-(
-  cd "$WORK"
-  git config --local chbranch.previousBranch main
-  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
-  git config --local --add chbranch.branchStack dev/local-only
-  git config --local --add chbranch.branchStack v1.0.0
-  git switch v1.0.0 >/dev/null 2>&1
-)
-rc=$(run_in_work_capture "$TMPDIR/child-after-back.out" -c)
-[[ "$rc" -eq 0 ]] || fail "-c after -b-style state should exit 0 (got $rc)"
-assert_contains "dev/local-only" "$TMPDIR/child-after-back.out"
-[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
-  fail "-c should skip the current stack entry and select the next child"
-[[ -z "$(git -C "$WORK" config --local --get-all chbranch.branchStack)" ]] || \
-  fail "-c should consume skipped and selected child stack entries"
-pass "child navigation skips current stack entry"
-
-# -r -c selects the remote copy of the stacked child branch.
-(
-  cd "$WORK"
-  git config --local --unset-all chbranch.previousBranch >/dev/null 2>&1 || true
-  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
-)
-rc=$(run_in_work_capture "$TMPDIR/child-remote-a.out" main)
-[[ "$rc" -eq 0 ]] || fail "remote child a setup should exit 0 (got $rc)"
-rc=$(run_in_work_capture "$TMPDIR/child-remote-b.out" dev/target)
-[[ "$rc" -eq 0 ]] || fail "remote child b setup should exit 0 (got $rc)"
-rc=$(run_in_work_capture "$TMPDIR/child-remote-c.out" dev/local-only)
-[[ "$rc" -eq 0 ]] || fail "remote child c setup should exit 0 (got $rc)"
-rc=$(run_in_work_capture "$TMPDIR/child-remote.out" -r -c)
-[[ "$rc" -eq 0 ]] || fail "-r -c should exit 0 (got $rc)"
-assert_contains "dev/target" "$TMPDIR/child-remote.out"
-assert_contains "[remote copy]" "$TMPDIR/child-remote.out"
-[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "r-dev/target" ]] || \
-  fail "-r -c should select the remote copy of the stacked branch"
-rc=$(run_in_work_capture "$TMPDIR/child-restore-local.out" dev/local-only)
-[[ "$rc" -eq 0 ]] || fail "child restore local should exit 0 (got $rc)"
-pass "remote child branch stack navigation"
+  fail "second -b should select the older previous branch"
+rc=$(run_in_work_capture "$TMPDIR/history-forward-first.out" -f)
+[[ "$rc" -eq 0 ]] || fail "first -f should exit 0 (got $rc)"
+assert_contains "dev/target" "$TMPDIR/history-forward-first.out"
+rc=$(run_in_work_capture "$TMPDIR/history-forward-second.out" -f)
+[[ "$rc" -eq 0 ]] || fail "second -f should exit 0 (got $rc)"
+assert_contains "main" "$TMPDIR/history-forward-second.out"
+rc=$(run_in_work_capture "$TMPDIR/history-back-again.out" -b)
+[[ "$rc" -eq 0 ]] || fail "back before new selection should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/history-new-selection.out" v1.0.0)
+[[ "$rc" -eq 0 ]] || fail "new selection should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/history-forward-cleared.out" -f)
+[[ "$rc" -eq 3 ]] || fail "-f after new selection should exit 3 (got $rc)"
+assert_contains "No next branch is recorded" "$TMPDIR/history-forward-cleared.out"
+rc=$(run_in_work_capture "$TMPDIR/history-restore-local.out" dev/local-only)
+[[ "$rc" -eq 0 ]] || fail "history restore local should exit 0 (got $rc)"
+pass "back and forward branch navigation"
 
 # Missing branches use mode-specific exits.
 rc=$(run_in_work_capture "$TMPDIR/missing-default.out" zz-missing-branch)
@@ -619,22 +595,23 @@ set -e
   fail "retry remote fetch should use triple the requested timeout"
 pass "remote fetch retry uses extended timeout"
 
-# Refreshing the current remote copy must not alter -b or -u history.
+# Refreshing the current remote copy must not alter back or next history.
 (
   cd "$WORK"
-  git config --local chbranch.previousBranch dev/local-only
-  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
-  git config --local --add chbranch.branchStack v1.0.0
-  git config --local --add chbranch.branchStack dev/local-only
+  git config --local --unset-all chbranch.backStack >/dev/null 2>&1 || true
+  git config --local --unset-all chbranch.forwardStack >/dev/null 2>&1 || true
+  git config --local --add chbranch.backStack v1.0.0
+  git config --local --add chbranch.backStack dev/local-only
+  git config --local --add chbranch.forwardStack main
 )
-remote_previous_before="$(git -C "$WORK" config --local --get chbranch.previousBranch)"
-remote_stack_before="$(git -C "$WORK" config --local --get-all chbranch.branchStack)"
+remote_back_before="$(git -C "$WORK" config --local --get-all chbranch.backStack)"
+remote_forward_before="$(git -C "$WORK" config --local --get-all chbranch.forwardStack)"
 rc=$(run_in_work_capture "$TMPDIR/remote-history.out" -r dev/target)
 [[ "$rc" -eq 0 ]] || fail "current remote history check should exit 0 (got $rc)"
-[[ "$(git -C "$WORK" config --local --get chbranch.previousBranch)" == \
-  "$remote_previous_before" ]] || fail "same remote branch should preserve previous branch"
-[[ "$(git -C "$WORK" config --local --get-all chbranch.branchStack)" == \
-  "$remote_stack_before" ]] || fail "same remote branch should preserve branch stack"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.backStack)" == \
+  "$remote_back_before" ]] || fail "same remote branch should preserve back history"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.forwardStack)" == \
+  "$remote_forward_before" ]] || fail "same remote branch should preserve next history"
 pass "same remote branch preserves navigation history"
 
 rc=$(run_in_work_capture "$TMPDIR/remote-refreshed.out" -r dev/target)
