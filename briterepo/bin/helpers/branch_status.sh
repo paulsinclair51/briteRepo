@@ -55,6 +55,20 @@ bt_branch_status_init() {
   FETCH_FAILED=false
   INITIAL_STATUS_PORCELAIN=""
   CURRENT_IS_REMOTE_SNAPSHOT=false
+  PR_COUNTS_LOADED=false
+  PR_LOOKUP_STATUS=""
+  PR_LOOKUP_ERROR=""
+  declare -gA PR_COUNTS_BY_BRANCH=()
+  BASE_REF_CANDIDATES=""
+  BASE_REF_CANDIDATES_LOADED=false
+  BRANCH_EXISTENCE_LOADED=false
+  declare -gA LOCAL_BRANCH_SET=()
+  declare -gA REMOTE_BRANCH_SET=()
+
+  if ! SCRATCH_DIR="$(mktemp -d)"; then
+    bt_emit_error "Failed to create temporary directory for command output."
+    exit "$EXIT_RUNTIME_ERROR"
+  fi
 
   if ! WARNINGS_FILE="$(mktemp)"; then
     bt_emit_error "Failed to create temporary file for warnings."
@@ -66,20 +80,45 @@ cleanup_runtime_files() {
   # shellcheck disable=SC2317  # Invoked by trap cleanup_runtime_files EXIT.
   # Suppress errors during cleanup to ensure trap always completes
   rm -f "$WARNINGS_FILE" 2>/dev/null || true
+  rm -rf "$SCRATCH_DIR" 2>/dev/null || true
   if [[ -n "$REPORT_LOCK_FD" ]]; then
     bt_report_release_lock "$REPORT_LOCK_FD"
     REPORT_LOCK_FD=""
   fi
 }
 
+# Ref existence is stable for a run, so read all refs once.
+load_branch_existence() {
+  local ref=""
+
+  BRANCH_EXISTENCE_LOADED=true
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    LOCAL_BRANCH_SET["$ref"]=1
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    [[ "$ref" == "origin/HEAD" ]] && continue
+    REMOTE_BRANCH_SET["${ref#origin/}"]=1
+  done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin)
+}
+
 # Branch existence checks
 has_local_branch() {
   local branch="$1"
+  if [[ "$BRANCH_EXISTENCE_LOADED" == true ]]; then
+    [[ -n "${LOCAL_BRANCH_SET["$branch"]:-}" ]]
+    return
+  fi
   git show-ref --verify --quiet "refs/heads/$branch"
 }
 
 has_remote_branch() {
   local branch="$1"
+  if [[ "$BRANCH_EXISTENCE_LOADED" == true ]]; then
+    [[ -n "${REMOTE_BRANCH_SET["$branch"]:-}" ]]
+    return
+  fi
   git show-ref --verify --quiet "refs/remotes/origin/$branch"
 }
 
@@ -134,22 +173,10 @@ capture_command_output() {
   local stderr_var="$2"
   shift 2
 
-  local stdout_file
-  local stderr_file
+  # Scratch paths are per-shell so subshell captures cannot collide.
+  local stdout_file="$SCRATCH_DIR/capture-$BASHPID.out"
+  local stderr_file="$SCRATCH_DIR/capture-$BASHPID.err"
   local rc
-  
-  # Create temporary files for captured output
-  if ! stdout_file=$(mktemp); then
-    printf -v "$stdout_var" '%s' ""
-    printf -v "$stderr_var" '%s' "mktemp failed for stdout"
-    return 1
-  fi
-  if ! stderr_file=$(mktemp); then
-    rm -f "$stdout_file"
-    printf -v "$stdout_var" '%s' ""
-    printf -v "$stderr_var" '%s' "mktemp failed for stderr"
-    return 1
-  fi
 
   # Execute command and capture output; preserve exit code
   set +e
@@ -161,8 +188,6 @@ capture_command_output() {
   printf -v "$stdout_var" '%s' "$(<"$stdout_file")"
   printf -v "$stderr_var" '%s' "$(<"$stderr_file")"
 
-  # Clean up temporary files
-  rm -f "$stdout_file" "$stderr_file" || true
   return "$rc"
 }
 
@@ -179,6 +204,9 @@ branch_name_status_display() {
 
 resolve_current_branch_name() {
   local current_branch=""
+  local local_branches=""
+  local local_count=""
+  local remembered_branch=""
   local remote_branches=""
   local remote_count=""
 
@@ -190,6 +218,26 @@ resolve_current_branch_name() {
   fi
   if [[ "$current_branch" != "HEAD" && -n "$current_branch" ]]; then
     printf '%s\n' "$current_branch"
+    return 0
+  fi
+
+  local_branches=$(git for-each-ref --format='%(refname)' \
+    --points-at HEAD refs/heads 2>/dev/null | \
+    sed 's#^refs/heads/##' || true)
+  local_count=$(printf '%s\n' "$local_branches" | sed '/^$/d' | \
+    wc -l | tr -d ' ')
+  if [[ "$local_count" == "1" ]]; then
+    printf '%s\n' "$local_branches"
+    return 0
+  fi
+
+  remembered_branch="$(git config --local --get chbranch.lastBranch \
+    2>/dev/null || true)"
+  if [[ -n "$remembered_branch" ]] && \
+    git show-ref --verify --quiet "refs/heads/$remembered_branch" && \
+    git merge-base --is-ancestor "$remembered_branch" HEAD && \
+    git merge-base --is-ancestor HEAD "$remembered_branch"; then
+    printf '%s\n' "$remembered_branch"
     return 0
   fi
 
@@ -359,41 +407,60 @@ get_behind_count() {
   printf '%s\n' "$rev_list_output"
 }
 
-get_pending_pr_count() {
-  local branch="$1"
+# One bulk PR query per run; per-branch counts are served from the cache.
+load_pending_pr_counts() {
   local pr_output=""
   local pr_error=""
-  local pr_count
+  local head_ref=""
+
+  PR_COUNTS_LOADED=true
 
   if ! command -v gh >/dev/null 2>&1; then
-    record_diagnostic \
-      "PR lookup unavailable for '$branch'; PR column shown as N/A." \
-      "gh CLI not found"
-    echo "N/A"
+    PR_LOOKUP_STATUS="unavailable"
+    PR_LOOKUP_ERROR="gh CLI not found"
     return 0
   fi
 
   if ! capture_command_output \
     pr_output pr_error \
-    bt_run_remote_command gh pr list --head "$branch" --state open \
-      --json number --jq 'length'; then
-    record_diagnostic \
-      "Failed to query pull requests for '$branch'; PR column shown as N/A." \
-      "$pr_error"
-    echo "N/A"
+    bt_run_remote_command gh pr list --state open --limit 1000 \
+      --json headRefName --jq '.[].headRefName'; then
+    PR_LOOKUP_STATUS="failed"
+    PR_LOOKUP_ERROR="$pr_error"
     return 0
   fi
 
-  pr_count="$pr_output"
+  PR_LOOKUP_STATUS="ok"
+  while IFS= read -r head_ref; do
+    [[ -n "$head_ref" ]] || continue
+    PR_COUNTS_BY_BRANCH["$head_ref"]=$(( \
+      ${PR_COUNTS_BY_BRANCH["$head_ref"]:-0} + 1 ))
+  done <<< "$pr_output"
+}
 
-  if [[ "$pr_count" =~ ^[0-9]+$ ]]; then
-    echo "$pr_count"
-  else
-    record_diagnostic \
-      "Unexpected PR lookup output for '$branch'; PR column shown as N/A." \
-      "$pr_count"
-    echo "N/A"
-  fi
+get_pending_pr_count() {
+  local branch="$1"
+
+  [[ "$PR_COUNTS_LOADED" == true ]] || load_pending_pr_counts
+
+  case "$PR_LOOKUP_STATUS" in
+    unavailable)
+      record_diagnostic \
+        "PR lookup unavailable for '$branch'; PR column shown as N/A." \
+        "$PR_LOOKUP_ERROR"
+      echo "N/A"
+      return 0
+      ;;
+    failed)
+      record_diagnostic \
+        "Failed to query pull requests for '$branch'; PR column shown as N/A." \
+        "$PR_LOOKUP_ERROR"
+      echo "N/A"
+      return 0
+      ;;
+  esac
+
+  echo "${PR_COUNTS_BY_BRANCH["$branch"]:-0}"
 }
 
 ensure_remote_refs_fetched() {
@@ -478,6 +545,25 @@ build_report_command() {
   fi
 }
 
+# Candidate refs are stable for a run, so enumerate them once.
+load_base_ref_candidates() {
+  local ref=""
+  local candidates=""
+
+  BASE_REF_CANDIDATES_LOADED=true
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    [[ "$ref" == r-* ]] && continue
+    candidates+="$ref"$'\n'
+  done < <(
+    {
+      git for-each-ref --format='%(refname:short)' refs/heads
+      git for-each-ref --format='%(refname:short)' refs/remotes/origin
+    } | sort -u
+  )
+  BASE_REF_CANDIDATES="$candidates"
+}
+
 get_branch_base_reference() {
   local branch="$1"
   local branch_ref="$branch"
@@ -524,6 +610,8 @@ get_branch_base_reference() {
     return 0
   fi
 
+  [[ "$BASE_REF_CANDIDATES_LOADED" == true ]] || load_base_ref_candidates
+
   local best_base=""
   local best_distance=""
   local ref
@@ -565,15 +653,7 @@ get_branch_base_reference() {
       best_distance="$distance"
       best_base="$candidate_display"
     fi
-  done < <(
-    {
-      git for-each-ref --format='%(refname:short)' refs/heads
-      git for-each-ref --format='%(refname:short)' refs/remotes/origin
-    } | while IFS= read -r ref; do
-      [[ "$ref" == r-* ]] && continue
-      printf '%s\n' "$ref"
-    done | sort -u
-  )
+  done <<< "$BASE_REF_CANDIDATES"
 
   if [[ -z "$best_base" ]]; then
     record_diagnostic \
@@ -1327,9 +1407,10 @@ if [[ -n "$TARGET_BRANCH" ]]; then
     BRANCHES_TO_CHECK REMOTE_BRANCHES_TO_CHECK REMOTE_ONLY
 elif [[ -z "$BRANCH_PATTERN" ]]; then
   # Default scope is the current branch's local and remote refs.
-  if ! has_local_branch "$ORIGINAL_BRANCH"; then
+  if ! has_local_branch "$ORIGINAL_BRANCH" && \
+    ! has_remote_branch "$ORIGINAL_BRANCH"; then
     bt_error_exit "$EXIT_NOT_FOUND" \
-      "Current branch $ORIGINAL_BRANCH not found locally."
+      "Current branch $ORIGINAL_BRANCH not found locally or on origin."
   fi
 
   bt_collect_lsbranch_mode_branches current "$TARGET_BRANCH" \
@@ -1375,6 +1456,14 @@ if [[ "$FETCH_FAILED" == true ]] &&
     bt_warn "$(printf '%s%s' \
       "Cannot connect to remote repository. Branch status uses cached " \
       "refs from your last successful remote update.")"
+fi
+
+# Per-branch lookups run inside command substitution, so their caches cannot
+# persist from a subshell. Prime them here instead.
+if [[ -n "$BRANCHES_TO_CHECK" || -n "$REMOTE_BRANCHES_TO_CHECK" ]]; then
+  load_pending_pr_counts
+  load_base_ref_candidates
+  load_branch_existence
 fi
 
 # No-argument invocation shows local and remote rows for the current branch

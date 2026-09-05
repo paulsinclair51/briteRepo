@@ -216,30 +216,40 @@ bt_git_collect_change_summary_from_files() {
   local status_file="$1"
   local old_files="$2"
   local new_files="$3"
-  local old_directories=""
-  local new_directories=""
   local directory_rename_candidates=""
-  local renamed_directory_pairs=""
   local one_to_one_directory_pairs=""
-  local renamed_old_directories=""
-  local renamed_new_directories=""
   local status=""
   local old_path=""
   local new_path=""
   local old_directory=""
   local new_directory=""
   local directory=""
+  local directory_pair=""
+  local -A old_directories=()
+  local -A new_directories=()
+  local -A renamed_old_directories=()
+  local -A renamed_new_directories=()
+  local -A renamed_directory_pairs=()
 
   bt_git_reset_change_summary
-  old_directories="$(mktemp)"
-  new_directories="$(mktemp)"
   directory_rename_candidates="$(mktemp)"
-  renamed_directory_pairs="$(mktemp)"
   one_to_one_directory_pairs="$(mktemp)"
-  renamed_old_directories="$(mktemp)"
-  renamed_new_directories="$(mktemp)"
-  bt_git_list_parent_directories "$old_files" "$old_directories"
-  bt_git_list_parent_directories "$new_files" "$new_directories"
+  while IFS= read -r old_path; do
+    directory="${old_path%/*}"
+    while [[ "$directory" != "$old_path" && "$directory" != "." ]]; do
+      old_directories["$directory"]=1
+      old_path="$directory"
+      directory="${old_path%/*}"
+    done
+  done < "$old_files"
+  while IFS= read -r new_path; do
+    directory="${new_path%/*}"
+    while [[ "$directory" != "$new_path" && "$directory" != "." ]]; do
+      new_directories["$directory"]=1
+      new_path="$directory"
+      directory="${new_path%/*}"
+    done
+  done < "$new_files"
 
   exec 8<"$status_file"
   while IFS= read -r -d '' status <&8; do
@@ -290,41 +300,36 @@ bt_git_collect_change_summary_from_files() {
   ' "$directory_rename_candidates" > "$one_to_one_directory_pairs"
   while IFS=$'\t' read -r old_directory new_directory; do
     [[ -n "$old_directory" && -n "$new_directory" ]] || continue
-    grep -Fxq -- "$old_directory" "$new_directories" && continue
-    grep -Fxq -- "$new_directory" "$old_directories" && continue
-    printf '%s\t%s\n' "$old_directory" "$new_directory" \
-      >> "$renamed_directory_pairs"
+    [[ -n "${new_directories["$old_directory"]:-}" ]] && continue
+    [[ -n "${old_directories["$new_directory"]:-}" ]] && continue
+    directory_pair="$old_directory"$'\t'"$new_directory"
+    renamed_directory_pairs["$directory_pair"]=1
+    renamed_old_directories["$old_directory"]=1
+    renamed_new_directories["$new_directory"]=1
   done < "$one_to_one_directory_pairs"
-  cut -f1 "$renamed_directory_pairs" | sort -u \
-    > "$renamed_old_directories"
-  cut -f2 "$renamed_directory_pairs" | sort -u \
-    > "$renamed_new_directories"
-  BT_CHANGE_RENAMED_DIRECTORIES="$(wc -l \
-    < "$renamed_directory_pairs" | tr -d ' ')"
+  BT_CHANGE_RENAMED_DIRECTORIES="${#renamed_directory_pairs[@]}"
 
   while IFS= read -r directory; do
     [[ -n "$directory" ]] || continue
-    grep -Fxq -- "$directory" "$new_directories" && continue
-    grep -Fxq -- "$directory" "$renamed_old_directories" && continue
+    [[ -n "${new_directories["$directory"]:-}" ]] && continue
+    [[ -n "${renamed_old_directories["$directory"]:-}" ]] && continue
     ((++BT_CHANGE_DELETED_DIRECTORIES))
     BT_CHANGE_DIRECTORY_ROWS+=("$directory|Deleted")
-  done < "$old_directories"
+  done < <(printf '%s\n' "${!old_directories[@]}" | sort)
   while IFS= read -r directory; do
     [[ -n "$directory" ]] || continue
-    grep -Fxq -- "$directory" "$old_directories" && continue
-    grep -Fxq -- "$directory" "$renamed_new_directories" && continue
+    [[ -n "${old_directories["$directory"]:-}" ]] && continue
+    [[ -n "${renamed_new_directories["$directory"]:-}" ]] && continue
     ((++BT_CHANGE_ADDED_DIRECTORIES))
     BT_CHANGE_DIRECTORY_ROWS+=("$directory|Added")
-  done < "$new_directories"
-  while IFS=$'\t' read -r old_directory new_directory; do
-    [[ -n "$old_directory" && -n "$new_directory" ]] || continue
+  done < <(printf '%s\n' "${!new_directories[@]}" | sort)
+  while IFS= read -r directory_pair; do
+    [[ -n "$directory_pair" ]] || continue
+    IFS=$'\t' read -r old_directory new_directory <<< "$directory_pair"
     BT_CHANGE_DIRECTORY_ROWS+=("$new_directory|Renamed (was $old_directory)")
-  done < "$renamed_directory_pairs"
+  done < <(printf '%s\n' "${!renamed_directory_pairs[@]}" | sort)
 
-  rm -f "$old_directories" "$new_directories" \
-    "$directory_rename_candidates" "$renamed_directory_pairs" \
-    "$one_to_one_directory_pairs" "$renamed_old_directories" \
-    "$renamed_new_directories"
+  rm -f "$directory_rename_candidates" "$one_to_one_directory_pairs"
 }
 
 bt_git_collect_ref_change_summary() {
