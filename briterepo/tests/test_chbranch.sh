@@ -156,11 +156,15 @@ assert_contains "[retarget in progress]" "$TMPDIR/help.out"
 assert_contains "[pulldown in progress]" "$TMPDIR/help.out"
 assert_contains "[parent NAME]" "$TMPDIR/help.out"
 assert_contains "[parent unavailable NAME]" "$TMPDIR/help.out"
+assert_contains "-c          Change to the last child branch used from the current branch." \
+  "$TMPDIR/help.out"
 assert_contains "-f          Change forward to the next branch." \
   "$TMPDIR/help.out"
 assert_contains "-b selects the previous branch; -f selects the next branch." \
   "$TMPDIR/help.out"
-assert_contains "Selecting a different branch clears next" \
+assert_contains "different branch clears next-branch history. Reselecting the current" \
+  "$TMPDIR/help.out"
+assert_contains "-p selects the branch's parent. After a parent selection, -c returns to" \
   "$TMPDIR/help.out"
 assert_matches '^[[:space:]]*3[[:space:]]+Branch not found, no previous branch is recorded, no branch stack entry$' \
   "$TMPDIR/help.out"
@@ -196,12 +200,18 @@ assert_contains "mutually exclusive" "$TMPDIR/mutually-exclusive.out"
 rc=$(run_in_work_capture "$TMPDIR/back-with-branch.out" -b dev/target)
 [[ "$rc" -eq 1 ]] || fail "-b with branch should exit 1 (got $rc)"
 assert_contains "BRANCH is not allowed with -b" "$TMPDIR/back-with-branch.out"
+rc=$(run_in_work_capture "$TMPDIR/child-with-branch.out" -c dev/target)
+[[ "$rc" -eq 1 ]] || fail "-c with branch should exit 1 (got $rc)"
+assert_contains "BRANCH is not allowed with -c" "$TMPDIR/child-with-branch.out"
 rc=$(run_in_work_capture "$TMPDIR/forward-with-branch.out" -f dev/target)
 [[ "$rc" -eq 1 ]] || fail "-f with branch should exit 1 (got $rc)"
 assert_contains "BRANCH is not allowed with -f" "$TMPDIR/forward-with-branch.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-with-back.out" -p -b)
 [[ "$rc" -eq 1 ]] || fail "-p with -b should exit 1 (got $rc)"
 assert_contains "mutually exclusive" "$TMPDIR/parent-with-back.out"
+rc=$(run_in_work_capture "$TMPDIR/parent-with-child.out" -p -c)
+[[ "$rc" -eq 1 ]] || fail "-p with -c should exit 1 (got $rc)"
+assert_contains "mutually exclusive" "$TMPDIR/parent-with-child.out"
 rc=$(run_in_work_capture "$TMPDIR/parent-with-forward.out" -p -f)
 [[ "$rc" -eq 1 ]] || fail "-p with -f should exit 1 (got $rc)"
 assert_contains "mutually exclusive" "$TMPDIR/parent-with-forward.out"
@@ -351,6 +361,69 @@ assert_contains "[remote copy]" "$TMPDIR/parent-remote.out"
   git push origin --delete v1.0.0 >/dev/null 2>&1
 )
 pass "parent navigation"
+
+# -p remembers the last child for each parent; -c returns to that child.
+(
+  cd "$WORK"
+  git config --local --unset-all chbranch.lastChild >/dev/null 2>&1 || true
+  git branch dev/nav-parent-v1.0.0 v1.0.0
+  git branch dev/alternate-v1.0.0 v1.0.0
+  git push origin dev/nav-parent-v1.0.0 dev/alternate-v1.0.0 >/dev/null 2>&1
+  git switch dev/nav-parent-v1.0.0 >/dev/null 2>&1
+)
+rc=$(run_in_work_capture "$TMPDIR/child-parent-up.out" -p)
+[[ "$rc" -eq 0 ]] || fail "parent selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.lastChild)" == \
+  $'v1.0.0\tdev/nav-parent-v1.0.0' ]] || \
+  fail "parent selection should remember its child"
+rc=$(run_in_work_capture "$TMPDIR/child-parent-down.out" -c)
+[[ "$rc" -eq 0 ]] || fail "child selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/nav-parent-v1.0.0" ]] || \
+  fail "-c should return to the remembered child"
+rc=$(run_in_work_capture "$TMPDIR/child-parent-replace-child.out" dev/alternate-v1.0.0)
+[[ "$rc" -eq 0 ]] || fail "alternate child selection should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/child-parent-replace-up.out" -p)
+[[ "$rc" -eq 0 ]] || fail "alternate parent selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" config --local --get-all chbranch.lastChild)" == \
+  $'v1.0.0\tdev/alternate-v1.0.0' ]] || \
+  fail "parent selection should replace its remembered child"
+rc=$(run_in_work_capture "$TMPDIR/child-parent-replace-down.out" -c)
+[[ "$rc" -eq 0 ]] || fail "replaced child selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/alternate-v1.0.0" ]] || \
+  fail "-c should select the replacement child"
+(
+  cd "$WORK"
+  git config --local --unset-all chbranch.lastChild >/dev/null 2>&1 || true
+  git switch v1.0.0 >/dev/null 2>&1
+)
+rc=$(run_in_work_capture "$TMPDIR/child-parent-none.out" -c)
+[[ "$rc" -eq 0 ]] || fail "missing child selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "v1.0.0" ]] || \
+  fail "-c without a remembered child should remain on the current branch"
+(
+  cd "$WORK"
+  git config --local --add chbranch.lastChild $'v1.0.0\tdev/local-only'
+)
+rc=$(run_in_work_capture "$TMPDIR/child-parent-stale.out" -c)
+[[ "$rc" -eq 0 ]] || fail "stale child selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "v1.0.0" ]] || \
+  fail "-c should ignore a branch that is not a child of the current branch"
+(
+  cd "$WORK"
+  git switch dev/nav-parent-v1.0.0 >/dev/null 2>&1
+)
+rc=$(run_in_work_capture "$TMPDIR/child-parent-remote-up.out" -p)
+[[ "$rc" -eq 0 ]] || fail "remote child setup parent selection should exit 0 (got $rc)"
+rc=$(run_in_work_capture "$TMPDIR/child-parent-remote-down.out" -r -c)
+[[ "$rc" -eq 0 ]] || fail "remote child selection should exit 0 (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "r-dev/nav-parent-v1.0.0" ]] || \
+  fail "-r -c should select the remembered child remote copy"
+(
+  cd "$WORK"
+  git switch dev/local-only >/dev/null 2>&1
+  git branch -D dev/nav-parent-v1.0.0 dev/alternate-v1.0.0 >/dev/null 2>&1
+)
+pass "parent and child navigation"
 
 # -b selects the previous branch; -f returns to the next branch.
 (
