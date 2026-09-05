@@ -162,6 +162,7 @@ pass "fixremote -d and -e are mutually exclusive"
 rc=$(run_capture "$TMPDIR/unauth.out" env GITHUB_ACTOR="randomuser" bash "$RUNNER/briterepo/bin/fixremote" "$SOURCE_CLONE")
 [[ "$rc" -eq 2 ]] || fail "fixremote unauthorized run should exit 2 (got $rc)"
 assert_contains "not authorized to run fixremote" "$TMPDIR/unauth.out"
+assert_contains "contact an approver or repository owner" "$TMPDIR/unauth.out"
 pass "authorization enforcement"
 
 # 5) -x with -t 0 should block recovery and report issue

@@ -289,7 +289,7 @@ push_validate_prerequisites() {
   if ! push_require_contributor_role; then
     bt_emit_prerequisite_failure 2 \
       "User is not a contributor." \
-      "use an account and merge path authorized by repository policy, then rerun push."
+      "contact an approver or repository owner"
   fi
   if bt_is_protected_branch "$current_branch" && \
     [[ "$PENDING_PUSHUP" != true ]] && \

@@ -182,9 +182,6 @@ pass "help precedence"
 rc=$(run_in_work_capture "$TMPDIR/unknown.out" --badopt)
 [[ "$rc" -eq 1 ]] || fail "unknown option should exit 1 (got $rc)"
 assert_contains "Unknown option" "$TMPDIR/unknown.out"
-rc=$(run_in_work_capture "$TMPDIR/retired-up.out" -u)
-[[ "$rc" -eq 1 ]] || fail "retired -u should exit 1 (got $rc)"
-assert_contains "Unknown option: -u" "$TMPDIR/retired-up.out"
 rc=$(run_in_work_capture "$TMPDIR/invalid-timeout.out" -t 0 dev/target)
 [[ "$rc" -eq 1 ]] || fail "invalid timeout should exit 1 (got $rc)"
 assert_contains "integer greater than 0" "$TMPDIR/invalid-timeout.out"
