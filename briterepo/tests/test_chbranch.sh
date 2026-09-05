@@ -363,6 +363,24 @@ assert_contains "dev/local-only" "$TMPDIR/child-stack-second.out"
   fail "second -c should continue through the branch stack"
 pass "child branch stack navigation"
 
+# -c skips a stack entry for the current branch left behind by -b.
+(
+  cd "$WORK"
+  git config --local chbranch.previousBranch main
+  git config --local --unset-all chbranch.branchStack >/dev/null 2>&1 || true
+  git config --local --add chbranch.branchStack dev/local-only
+  git config --local --add chbranch.branchStack v1.0.0
+  git switch v1.0.0 >/dev/null 2>&1
+)
+rc=$(run_in_work_capture "$TMPDIR/child-after-back.out" -c)
+[[ "$rc" -eq 0 ]] || fail "-c after -b-style state should exit 0 (got $rc)"
+assert_contains "dev/local-only" "$TMPDIR/child-after-back.out"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
+  fail "-c should skip the current stack entry and select the next child"
+[[ -z "$(git -C "$WORK" config --local --get-all chbranch.branchStack)" ]] || \
+  fail "-c should consume skipped and selected child stack entries"
+pass "child navigation skips current stack entry"
+
 # -r -c selects the remote copy of the stacked child branch.
 (
   cd "$WORK"

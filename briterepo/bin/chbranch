@@ -287,24 +287,36 @@ push_branch_stack() {
     >/dev/null 2>&1 || true
 }
 
-top_branch_stack_or_empty() {
+child_branch_from_stack_or_empty() {
+  local current_branch="$1"
   local branch=""
-  local top_branch=""
+  local index=0
+  local -a branches=()
+  local pop_count=0
 
   while IFS= read -r branch; do
     if [[ -n "$branch" ]] && \
       git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-      top_branch="$branch"
+      branches+=("$branch")
     fi
   done < <(git config --local --get-all "$BRANCH_STACK_KEY" 2>/dev/null || true)
 
-  echo "$top_branch"
+  for ((index = ${#branches[@]} - 1; index >= 0; index--)); do
+    pop_count=$((pop_count + 1))
+    if [[ "${branches[$index]}" != "$current_branch" ]]; then
+      printf '%s\t%s\n' "$pop_count" "${branches[$index]}"
+      return 0
+    fi
+  done
+
+  printf '%s\t\n' "$pop_count"
 }
 
-pop_branch_stack() {
+pop_branch_stack_entries() {
+  local count="$1"
   local branch=""
   local index=0
-  local last_index=-1
+  local retained_count=0
   local -a branches=()
 
   while IFS= read -r branch; do
@@ -315,9 +327,10 @@ pop_branch_stack() {
   done < <(git config --local --get-all "$BRANCH_STACK_KEY" 2>/dev/null || true)
 
   git config --local --unset-all "$BRANCH_STACK_KEY" >/dev/null 2>&1 || true
-  last_index=$((${#branches[@]} - 1))
+  retained_count=$((${#branches[@]} - count))
+  [[ "$retained_count" -gt 0 ]] || return 0
   for index in "${!branches[@]}"; do
-    [[ "$index" -lt "$last_index" ]] || continue
+    [[ "$index" -lt "$retained_count" ]] || continue
     git config --local --add "$BRANCH_STACK_KEY" "${branches[$index]}" \
       >/dev/null 2>&1 || true
   done
@@ -333,7 +346,7 @@ remember_successful_selection() {
       >/dev/null 2>&1 || true
     case "$stack_action" in
       push) push_branch_stack "$previous_branch" ;;
-      pop) pop_branch_stack ;;
+      pop:*) pop_branch_stack_entries "${stack_action#pop:}" ;;
       none) ;;
     esac
   fi
@@ -757,6 +770,7 @@ resolve_branch_argument() {
 
 resolve_navigation_branch() {
   local base_branch=""
+  local child_selection=""
   local parent_branch=""
 
   if [[ "$USE_PREVIOUS" == true ]]; then
@@ -769,7 +783,9 @@ resolve_navigation_branch() {
   fi
 
   if [[ "$USE_UP" == true ]]; then
-    BRANCH_ARG="$(top_branch_stack_or_empty)"
+    child_selection="$(child_branch_from_stack_or_empty \
+      "$(current_branch_name_or_empty)")"
+    IFS=$'\t' read -r CHILD_STACK_POP_COUNT BRANCH_ARG <<< "$child_selection"
     if [[ -z "$BRANCH_ARG" ]]; then
       bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
         "No branch stack entry is recorded"
@@ -879,7 +895,7 @@ main() {
   if [[ "$USE_PREVIOUS" == true ]]; then
     stack_action="none"
   elif [[ "$USE_UP" == true ]]; then
-    stack_action="pop"
+    stack_action="pop:$CHILD_STACK_POP_COUNT"
   fi
 
   # Protected branches are read-only only in remote mode; local mode should
