@@ -14,6 +14,7 @@ Usage:
   chbranch [-l | -r] [-p] [-t SEC] [-v] [BRANCH]
   chbranch [-l | -r] -b [-t SEC] [-v]
   chbranch [-l | -r] -c [-t SEC] [-v]
+  chbranch [-l | -r] -f [-t SEC] [-v]
   chbranch {-h | --help}
 
 Change the current branch.
@@ -32,21 +33,26 @@ Arguments:
               uses the most recently selected branch name.
 
 Options:
-  -b          Change back to the previously selected branch. BRANCH is not
-              allowed with -b. Defaults to the local previous branch; use -r
-              to select the remote previous branch copy.
-              This option is mutually exclusive with -c and -p.
-  -c          Change to the most recently selected branch in the child stack.
-              BRANCH is not allowed with -c. Defaults to the local branch; use
-              -r to select the remote branch copy.
-              This option is mutually exclusive with -b and -p.
+  -b          Return to the previously selected branch. BRANCH is not
+              allowed with -b. If there is no such branch, stays on the
+              current branch. Use -r to select the remote previous branch
+              copy. This option is mutually exclusive with -c, -f, and -p.
+  -c          Change to the last child branch used from the current branch.
+              BRANCH is not allowed with -c. If no child branch is recorded,
+              stays on the current branch. Use -r to select the remote child
+              branch copy. This option is mutually exclusive with -b, -f,
+              and -p.
+  -f          Return to the branch selected before using -b. BRANCH is not
+              allowed with -f. If there is no such branch, stays on the
+              current branch. Use -r to select the remote branch copy. This
+              option is mutually exclusive with -b and -p.
   -h, --help  Output this help to stdout and exit (other options and
               arguments are ignored).
   -l          Change to local BRANCH.
   -p          Change to the parent of BRANCH. If BRANCH is omitted, change to
               the parent of the current branch. Defaults to the local parent;
               use -r to select the remote parent copy.
-              This option is mutually exclusive with -b and -c.
+              This option is mutually exclusive with -b, -c, and -f.
   -r          Change to a fresh read-only copy of remote BRANCH. The remote must be
               reachable. This option is mutually exclusive with -l.
   -t SEC      Timeout in seconds for accessing remote branch (default
@@ -69,9 +75,11 @@ Notes:
     explaining why is output to stdout.
   - Protected branches, remote copies, and branches with invalid names are
     effectively read-only. chbranch prints a warning when one is selected.
-  - -b returns to the immediately previous branch. -c follows the selection
-    history below the current branch; use -p to select the branch's parent.
-    Reselecting the current branch does not change either history.
+  - -b returns to the previously selected branch; -f returns to the branch
+    selected before using -b. Selecting a different branch clears this
+    history. Reselecting the current branch does not change history.
+  - -p selects the branch's parent. After a parent selection, -c returns to
+    the last child used from that parent when one is available.
   - Changing branches does not modify repository history or the remote.
   - Undo accidental changes to a read-only branch before changing to another
     branch. To make changes, switch to a local contributor or targeted branch
@@ -208,8 +216,9 @@ REMOTE_TIMEOUT_SECONDS=10
 CHBRANCH_LOCK_FD=""
 PUSHUP_LOCK_FD=""
 readonly LAST_BRANCH_KEY="chbranch.lastBranch"
-readonly PREVIOUS_BRANCH_KEY="chbranch.previousBranch"
-readonly BRANCH_STACK_KEY="chbranch.branchStack"
+readonly BACK_STACK_KEY="chbranch.backStack"
+readonly FORWARD_STACK_KEY="chbranch.forwardStack"
+readonly LAST_CHILD_KEY="chbranch.lastChild"
 
 arg_error() {
   local message="$1"
@@ -348,44 +357,82 @@ remember_last_branch() {
   git config --local "$LAST_BRANCH_KEY" "$branch" >/dev/null 2>&1 || true
 }
 
-push_branch_stack() {
-  local branch="$1"
+push_history_branch() {
+  local history_key="$1"
+  local branch="$2"
 
   [[ -n "$branch" ]] || return 0
-  git config --local --add "$BRANCH_STACK_KEY" "$branch" \
+  git config --local --add "$history_key" "$branch" >/dev/null 2>&1 || true
+}
+
+clear_history() {
+  local history_key="$1"
+
+  git config --local --unset-all "$history_key" >/dev/null 2>&1 || true
+}
+
+last_child_for_parent_or_empty() {
+  local parent="$1"
+  local mapping=""
+  local mapping_parent=""
+  local child=""
+
+  while IFS= read -r mapping; do
+    IFS=$'\t' read -r mapping_parent child <<< "$mapping"
+    [[ "$mapping_parent" == "$parent" && -n "$child" ]] || continue
+    printf '%s\n' "$child"
+    return 0
+  done < <(git config --local --get-all "$LAST_CHILD_KEY" 2>/dev/null || true)
+
+  return 0
+}
+
+remember_child_for_parent() {
+  local parent="$1"
+  local child="$2"
+  local mapping=""
+  local mapping_parent=""
+  local mapped_child=""
+  local -a retained_mappings=()
+
+  while IFS= read -r mapping; do
+    IFS=$'\t' read -r mapping_parent mapped_child <<< "$mapping"
+    [[ "$mapping_parent" == "$parent" ]] && continue
+    retained_mappings+=("$mapping")
+  done < <(git config --local --get-all "$LAST_CHILD_KEY" 2>/dev/null || true)
+
+  git config --local --unset-all "$LAST_CHILD_KEY" >/dev/null 2>&1 || true
+  for mapping in "${retained_mappings[@]}"; do
+    git config --local --add "$LAST_CHILD_KEY" "$mapping" >/dev/null 2>&1 || true
+  done
+  git config --local --add "$LAST_CHILD_KEY" "$parent"$'\t'"$child" \
     >/dev/null 2>&1 || true
 }
 
-child_branch_from_stack_or_empty() {
-  local current_branch="$1"
+top_history_branch_or_empty() {
+  local history_key="$1"
   local branch=""
   local index=0
   local -a branches=()
-  local pop_count=0
 
   while IFS= read -r branch; do
     if [[ -n "$branch" ]] && \
       git check-ref-format --branch "$branch" >/dev/null 2>&1; then
       branches+=("$branch")
     fi
-  done < <(git config --local --get-all "$BRANCH_STACK_KEY" 2>/dev/null || true)
+  done < <(git config --local --get-all "$history_key" 2>/dev/null || true)
 
-  for ((index = ${#branches[@]} - 1; index >= 0; index--)); do
-    pop_count=$((pop_count + 1))
-    if [[ "${branches[$index]}" != "$current_branch" ]]; then
-      printf '%s\t%s\n' "$pop_count" "${branches[$index]}"
-      return 0
-    fi
-  done
-
-  printf '%s\t\n' "$pop_count"
+  index=$((${#branches[@]} - 1))
+  if [[ "$index" -ge 0 ]]; then
+    printf '%s\n' "${branches[$index]}"
+  fi
+  return 0
 }
 
-pop_branch_stack_entries() {
-  local count="$1"
+pop_history_branch() {
+  local history_key="$1"
   local branch=""
   local index=0
-  local retained_count=0
   local -a branches=()
 
   while IFS= read -r branch; do
@@ -393,31 +440,40 @@ pop_branch_stack_entries() {
       git check-ref-format --branch "$branch" >/dev/null 2>&1; then
       branches+=("$branch")
     fi
-  done < <(git config --local --get-all "$BRANCH_STACK_KEY" 2>/dev/null || true)
+  done < <(git config --local --get-all "$history_key" 2>/dev/null || true)
 
-  git config --local --unset-all "$BRANCH_STACK_KEY" >/dev/null 2>&1 || true
-  retained_count=$((${#branches[@]} - count))
-  [[ "$retained_count" -gt 0 ]] || return 0
+  clear_history "$history_key"
+  index=$((${#branches[@]} - 1))
   for index in "${!branches[@]}"; do
-    [[ "$index" -lt "$retained_count" ]] || continue
-    git config --local --add "$BRANCH_STACK_KEY" "${branches[$index]}" \
-      >/dev/null 2>&1 || true
+    [[ "$index" -lt "$((${#branches[@]} - 1))" ]] || continue
+    push_history_branch "$history_key" "${branches[$index]}"
   done
 }
 
 remember_successful_selection() {
   local branch="$1"
   local previous_branch="$2"
-  local stack_action="${3:-push}"
+  local history_action="${3:-new}"
 
   if [[ -n "$previous_branch" && "$previous_branch" != "$branch" ]]; then
-    git config --local "$PREVIOUS_BRANCH_KEY" "$previous_branch" \
-      >/dev/null 2>&1 || true
-    case "$stack_action" in
-      push) push_branch_stack "$previous_branch" ;;
-      pop:*) pop_branch_stack_entries "${stack_action#pop:}" ;;
-      none) ;;
+    case "$history_action" in
+      new)
+        push_history_branch "$BACK_STACK_KEY" "$previous_branch"
+        clear_history "$FORWARD_STACK_KEY"
+        ;;
+      back)
+        pop_history_branch "$BACK_STACK_KEY"
+        push_history_branch "$FORWARD_STACK_KEY" "$previous_branch"
+        ;;
+      forward)
+        pop_history_branch "$FORWARD_STACK_KEY"
+        push_history_branch "$BACK_STACK_KEY" "$previous_branch"
+        ;;
     esac
+    if [[ "${RECORD_PARENT_CHILD:-false}" == true && \
+      "$(bt_resolve_parent_branch "$previous_branch" "")" == "$branch" ]]; then
+      remember_child_for_parent "$branch" "$previous_branch"
+    fi
   fi
   remember_last_branch "$branch"
 }
@@ -426,19 +482,6 @@ last_branch_or_empty() {
   local branch=""
 
   branch="$(git config --local --get "$LAST_BRANCH_KEY" 2>/dev/null || true)"
-  if [[ -n "$branch" ]] && \
-    git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-    echo "$branch"
-    return 0
-  fi
-
-  echo ""
-}
-
-previous_branch_or_empty() {
-  local branch=""
-
-  branch="$(git config --local --get "$PREVIOUS_BRANCH_KEY" 2>/dev/null || true)"
   if [[ -n "$branch" ]] && \
     git check-ref-format --branch "$branch" >/dev/null 2>&1; then
     echo "$branch"
@@ -593,7 +636,7 @@ ensure_remote_ref_available() {
 switch_local() {
   local branch="$1"
   local previous_branch="${2:-}"
-  local stack_action="${3:-push}"
+  local stack_action="${3:-new}"
 
   verbose_info "Switching to local branch '$branch'"
   switch_or_error "Failed to switch to local branch '$branch'" "$branch"
@@ -603,7 +646,7 @@ switch_local() {
 switch_remote_copy() {
   local branch="$1"
   local previous_branch="${2:-}"
-  local stack_action="${3:-push}"
+  local stack_action="${3:-new}"
   local local_branch="r-$branch"
 
   verbose_info "Switching to local remote copy '$local_branch'"
@@ -620,7 +663,7 @@ switch_remote_copy() {
 switch_local_snapshot() {
   local branch="$1"
   local previous_branch="${2:-}"
-  local stack_action="${3:-push}"
+  local stack_action="${3:-new}"
 
   verbose_info "Switching to read-only local branch '$branch'"
   switch_or_error "Failed to switch to read-only local branch '$branch'" \
@@ -709,8 +752,9 @@ parse_args() {
   FORCE_REMOTE=false
   FORCE_LOCAL=false
   USE_PARENT=false
-  USE_PREVIOUS=false
+  USE_BACK=false
   USE_CHILD=false
+  USE_FORWARD=false
   BRANCH_ARG=""
 
   while [[ $# -gt 0 ]]; do
@@ -725,10 +769,13 @@ parse_args() {
         USE_PARENT=true
         ;;
       -b)
-        USE_PREVIOUS=true
+        USE_BACK=true
         ;;
       -c)
         USE_CHILD=true
+        ;;
+      -f)
+        USE_FORWARD=true
         ;;
       -t)
         shift
@@ -762,16 +809,22 @@ parse_args() {
   if [[ "$FORCE_LOCAL" == true && "$FORCE_REMOTE" == true ]]; then
     arg_error "Options -l and -r are mutually exclusive"
   fi
-  if [[ "$USE_PARENT" == true && "$USE_PREVIOUS" == true ]] || \
+  if [[ "$USE_PARENT" == true && "$USE_BACK" == true ]] || \
     [[ "$USE_PARENT" == true && "$USE_CHILD" == true ]] || \
-    [[ "$USE_PREVIOUS" == true && "$USE_CHILD" == true ]]; then
-    arg_error "Options -p, -b, and -c are mutually exclusive"
+    [[ "$USE_PARENT" == true && "$USE_FORWARD" == true ]] || \
+    [[ "$USE_BACK" == true && "$USE_CHILD" == true ]] || \
+    [[ "$USE_BACK" == true && "$USE_FORWARD" == true ]] || \
+    [[ "$USE_CHILD" == true && "$USE_FORWARD" == true ]]; then
+    arg_error "Options -p, -b, -c, and -f are mutually exclusive"
   fi
-  if [[ "$USE_PREVIOUS" == true && -n "$BRANCH_ARG" ]]; then
+  if [[ "$USE_BACK" == true && -n "$BRANCH_ARG" ]]; then
     arg_error "BRANCH is not allowed with -b"
   fi
   if [[ "$USE_CHILD" == true && -n "$BRANCH_ARG" ]]; then
     arg_error "BRANCH is not allowed with -c"
+  fi
+  if [[ "$USE_FORWARD" == true && -n "$BRANCH_ARG" ]]; then
+    arg_error "BRANCH is not allowed with -f"
   fi
 
 }
@@ -789,25 +842,42 @@ resolve_branch_argument() {
 
 resolve_navigation_branch() {
   local base_branch=""
-  local child_selection=""
+  local child_branch=""
   local parent_branch=""
 
-  if [[ "$USE_PREVIOUS" == true ]]; then
-    BRANCH_ARG="$(previous_branch_or_empty)"
+  if [[ "$USE_BACK" == true ]]; then
+    BRANCH_ARG="$(top_history_branch_or_empty "$BACK_STACK_KEY")"
     if [[ -z "$BRANCH_ARG" ]]; then
-      bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
-        "No previous branch is recorded"
+      BRANCH_ARG="$(current_branch_name_or_empty)"
+      [[ -n "$BRANCH_ARG" ]] || bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
+        "Current branch name cannot be resolved"
+      NAVIGATION_NOOP=true
     fi
     return 0
   fi
 
   if [[ "$USE_CHILD" == true ]]; then
-    child_selection="$(child_branch_from_stack_or_empty \
-      "$(current_branch_name_or_empty)")"
-    IFS=$'\t' read -r CHILD_STACK_POP_COUNT BRANCH_ARG <<< "$child_selection"
+    base_branch="$(current_branch_name_or_empty)"
+    [[ -n "$base_branch" ]] || bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
+      "Current branch name cannot be resolved"
+    child_branch="$(last_child_for_parent_or_empty "$base_branch")"
+    if [[ -z "$child_branch" ]] || \
+      [[ "$(bt_resolve_parent_branch "$child_branch" "")" != "$base_branch" ]]; then
+      BRANCH_ARG="$base_branch"
+      NAVIGATION_NOOP=true
+      return 0
+    fi
+    BRANCH_ARG="$child_branch"
+    return 0
+  fi
+
+  if [[ "$USE_FORWARD" == true ]]; then
+    BRANCH_ARG="$(top_history_branch_or_empty "$FORWARD_STACK_KEY")"
     if [[ -z "$BRANCH_ARG" ]]; then
-      bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
-        "No branch stack entry is recorded"
+      BRANCH_ARG="$(current_branch_name_or_empty)"
+      [[ -n "$BRANCH_ARG" ]] || bt_error_exit "$EXIT_BRANCH_NOT_FOUND" \
+        "Current branch name cannot be resolved"
+      NAVIGATION_NOOP=true
     fi
     return 0
   fi
@@ -874,7 +944,7 @@ main() {
   local previous_remote_copy=""
   local previous_selection_branch=""
   local refreshing_remote_copy=false
-  local stack_action="push"
+  local stack_action="new"
   local msg=""
 
   show_help_if_requested "$@"
@@ -884,6 +954,8 @@ main() {
   acquire_pushup_lock
   acquire_chbranch_lock
   trap release_locks EXIT
+  RECORD_PARENT_CHILD=false
+  NAVIGATION_NOOP=false
   resolve_navigation_branch
   export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
 
@@ -907,18 +979,20 @@ main() {
     desired_mode="local"
   elif [[ "$FORCE_REMOTE" == true ]]; then
     desired_mode="remote"
-  elif [[ "$USE_PARENT" == true || "$USE_PREVIOUS" == true || \
-    "$USE_CHILD" == true ]]; then
+  elif [[ "$USE_PARENT" == true || "$USE_BACK" == true || \
+    "$USE_CHILD" == true || \
+    "$USE_FORWARD" == true ]]; then
     desired_mode="local"
   elif [[ "$has_local" == false ]]; then
     desired_mode="remote"
   fi
 
-  if [[ "$USE_PREVIOUS" == true ]]; then
-    stack_action="none"
-  elif [[ "$USE_CHILD" == true ]]; then
-    stack_action="pop:$CHILD_STACK_POP_COUNT"
+  if [[ "$USE_BACK" == true ]]; then
+    stack_action="back"
+  elif [[ "$USE_FORWARD" == true ]]; then
+    stack_action="forward"
   fi
+  [[ "$USE_PARENT" == true ]] && RECORD_PARENT_CHILD=true
 
   # Protected branches are read-only only in remote mode; local mode should
   # attach to the local branch so downstream scripts treat it as checked out.
@@ -932,6 +1006,10 @@ main() {
 
   curr_branch="$(current_local_branch)"
   previous_selection_branch="$(current_branch_name_or_empty)"
+  if [[ "$NAVIGATION_NOOP" == true ]]; then
+    emit_success_changed
+    exit 0
+  fi
   if is_remote_copy_branch "$curr_branch"; then
     previous_remote_copy="$curr_branch"
     if [[ "$FORCE_REMOTE" == true && \
