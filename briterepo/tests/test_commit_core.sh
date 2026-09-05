@@ -202,6 +202,24 @@ commit_count_after="$(cd "$WORK" && git rev-list --count HEAD)"
   fail "commit -e -- should not create a commit"
 pass "commit -e -- skip behavior"
 
+# A commit remains successful if its optional undo metadata cannot be saved.
+undo_history_dir="$(git -C "$WORK" rev-parse --path-format=absolute \
+  --git-common-dir)/briteRepo-undo-history"
+rm -rf "$undo_history_dir"
+printf 'block undo metadata\n' > "$undo_history_dir"
+printf '\nundo metadata failure test\n' >> "$WORK/README.md"
+commit_count_before="$(git -C "$WORK" rev-list --count HEAD)"
+rc=$(run_capture "$TMPDIR/undo-metadata-failure.out" env GITHUB_ACTOR=testuser \
+  bash -lc "cd '$WORK' && bash ./briterepo/bin/commit -c 'undo metadata failure test'")
+[[ "$rc" -eq 0 ]] || fail "commit with undo metadata failure should exit 0 (got $rc)"
+commit_count_after="$(git -C "$WORK" rev-list --count HEAD)"
+[[ "$commit_count_after" -eq $((commit_count_before + 1)) ]] || \
+  fail "commit should be created when undo metadata fails"
+assert_contains "undo metadata could not be recorded" \
+  "$TMPDIR/undo-metadata-failure.out"
+rm -f "$undo_history_dir"
+pass "undo metadata failure preserves commit"
+
 # 9) A failed non-dry commit should automatically write an error report.
 cat > "$WORK/.git/hooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash

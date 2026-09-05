@@ -1476,12 +1476,6 @@ elif bt_git_is_rebase_in_progress; then
     "resolve conflicts and rerun pull."
 fi
 
-if bt_is_copyfix_in_progress "$CURRENT_BRANCH"; then
-  bt_emit_prerequisite_failure "$EXIT_COPYFIX_IN_PROGRESS" \
-    "Current branch '$CURRENT_BRANCH' has an unfinished copyfix operation." \
-    "rerun copyfix to complete it before rerunning commit."
-fi
-
 initialize_commit_work_lock_paths "$CURRENT_BRANCH"
 acquire_commit_work_lock
 
@@ -1598,13 +1592,7 @@ if [[ "$VERBOSE" == true && "$COMMITTED_FILES" -gt 0 ]]; then
 fi
 
 if [[ "$COMMITTED_FILES" -gt 0 ]]; then
-  if [[ "$ERROR_RUN" == true ]]; then
-    emit_final_status "$(printf '%s%s%s' \
-      "Error-run: commit to ${CURRENT_BRANCH}: " \
-      "$COMMIT_CHANGE_SUMMARY" \
-      ".")" true
-    exit "$EXIT_WORKFLOW_SKIPPED"
-  elif [[ "$DRY_RUN" == true ]]; then
+  if [[ "$DRY_RUN" == true ]]; then
     generate_commit_report
     emit_final_status "$(printf '%s%s%s' \
       "Dry-run: commit to ${CURRENT_BRANCH}: " \
