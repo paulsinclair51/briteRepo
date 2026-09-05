@@ -70,17 +70,17 @@ Notes:
   - Protected branches, remote copies, and branches with invalid names are
     effectively read-only. chbranch prints a warning when one is selected.
   - Undo accidental changes to a read-only branch before changing to another
-    branch.
-  - To make changes, switch to a local contributor or targeted branch
-    (create one first using mkbranch if it doesn't exist).
+    branch. To make changes, switch to a local contributor or targeted branch
+    create one first using mkbranch if it doesn't exist).
 
 Examples:
   chbranch dev/my-feature-v1.0.0
   chbranch -r dev/my-feature-v1.0.0
 
 Outputs:
-  - Writes help text, status messages, and results or summaries to stdout. The
-    "Changed to ..." result includes status tags defined below.
+  - Writes help text, status messages, and results or summaries to stdout.
+  - For the result summary, writes the same output to stdout as running
+    lsbranch with no arguments or options.
   - Writes errors and guidance to stderr.
 
 Status tags:
@@ -246,76 +246,7 @@ ensure_required_commands() {
 }
 
 emit_success_changed() {
-  local mode="$1"
-  local branch="$2"
-  local refreshed="${3:-false}"
-  local status_output=""
-  local local_ref="refs/heads/$branch"
-  local tracking_local_ref="$local_ref"
-  local remote_ref="refs/remotes/origin/$branch"
-  local comparison_branch="$branch"
-  local display_branch="$branch"
-  local selected_ref="$local_ref"
-  local relation_tag=""
-  local parent_tag=""
-  local workflow_tags=""
-  local mode_tag="$mode"
-  local -a tags=()
-
-  if [[ "$mode" == "remote" ]]; then
-    mode_tag="remote copy"
-    comparison_branch="${REMOTE_SOURCE_BRANCH:-$branch}"
-    display_branch="$comparison_branch"
-    remote_ref="refs/remotes/origin/$comparison_branch"
-    tracking_local_ref="refs/heads/$comparison_branch"
-  elif [[ "$SELECTED_REMOTE_STATE" == "missing" ]]; then
-    mode_tag="local only"
-  fi
-  tags+=("[current]" "[$mode_tag]")
-  [[ "$refreshed" == true ]] && tags+=("[refreshed]")
-
-  if [[ "$mode" == "local" ]]; then
-    status_output="$(git status --porcelain 2>/dev/null || true)"
-    if [[ -n "$status_output" ]]; then
-      tags+=("[uncommitted]")
-    fi
-  fi
-  if [[ "$mode" == "remote" ]] || bt_is_read_only_branch "$branch"; then
-    tags+=("[read-only]")
-  fi
-  if ! bt_is_valid_branch_name "$comparison_branch"; then
-    tags+=("[invalid name]")
-  fi
-
-  if [[ "$SELECTED_REMOTE_STATE" == "offline" ]]; then
-    tags+=("[offline]")
-  elif git rev-parse --verify "$tracking_local_ref" >/dev/null 2>&1 && \
-    git rev-parse --verify "$remote_ref" >/dev/null 2>&1; then
-    if relation_tag="$(bt_git_tracking_relation_tag \
-      "$mode" "$tracking_local_ref" "$remote_ref")"; then
-      [[ -z "$relation_tag" ]] || tags+=("$relation_tag")
-    else
-      tags+=("[status unavailable]")
-    fi
-  fi
-
-  [[ "$mode" == "remote" ]] && selected_ref="$remote_ref"
-  if parent_tag="$(bt_git_parent_relation_tags \
-    "$mode" "$comparison_branch" "$selected_ref")"; then
-    [[ -z "$parent_tag" ]] || tags+=("$parent_tag")
-  else
-    tags+=("[status unavailable]")
-  fi
-  if [[ "$mode" == "local" ]]; then
-    workflow_tags="$(bt_git_workflow_in_progress_tags "$comparison_branch")"
-    [[ -z "$workflow_tags" ]] || tags+=("$workflow_tags")
-  fi
-  echo "$display_branch ${tags[*]}"
-
-  if [[ "$mode" == "remote" ]] || bt_is_read_only_branch "$branch"; then
-    echo "Warning: do not modify, rename, or delete files in this branch."
-    echo "If you do, undo the changes before switching."
-  fi
+  "$SCRIPT_DIR/lsbranch"
 }
 
 ensure_git_repository() {
@@ -736,14 +667,10 @@ finish_local_selection() {
   local branch="$1"
   local protected_branch="$2"
 
-  # Protected local branches may move only by safe fast-forward. Other local
-  # selections refresh the tracking ref solely to report current status.
   if [[ "$protected_branch" == true ]]; then
     refresh_selected_local_protected_branch "$branch"
-  else
-    refresh_remote_status_ref "$branch"
   fi
-  emit_success_changed "local" "$branch"
+  emit_success_changed
 }
 
 parse_args() {
@@ -1009,8 +936,7 @@ main() {
   if [[ "$desired_mode" == "remote" ]]; then
     switch_remote_copy "$TARGET_BRANCH" "$previous_selection_branch" \
       "$stack_action"
-    emit_success_changed "remote" "r-$TARGET_BRANCH" \
-      "$refreshing_remote_copy"
+    emit_success_changed
   elif [[ "$detach_local" == true ]]; then
     switch_local_snapshot "$TARGET_BRANCH" "$previous_selection_branch" \
       "$stack_action"

@@ -204,6 +204,9 @@ branch_name_status_display() {
 
 resolve_current_branch_name() {
   local current_branch=""
+  local local_branches=""
+  local local_count=""
+  local remembered_branch=""
   local remote_branches=""
   local remote_count=""
 
@@ -215,6 +218,26 @@ resolve_current_branch_name() {
   fi
   if [[ "$current_branch" != "HEAD" && -n "$current_branch" ]]; then
     printf '%s\n' "$current_branch"
+    return 0
+  fi
+
+  local_branches=$(git for-each-ref --format='%(refname)' \
+    --points-at HEAD refs/heads 2>/dev/null | \
+    sed 's#^refs/heads/##' || true)
+  local_count=$(printf '%s\n' "$local_branches" | sed '/^$/d' | \
+    wc -l | tr -d ' ')
+  if [[ "$local_count" == "1" ]]; then
+    printf '%s\n' "$local_branches"
+    return 0
+  fi
+
+  remembered_branch="$(git config --local --get chbranch.lastBranch \
+    2>/dev/null || true)"
+  if [[ -n "$remembered_branch" ]] && \
+    git show-ref --verify --quiet "refs/heads/$remembered_branch" && \
+    git merge-base --is-ancestor "$remembered_branch" HEAD && \
+    git merge-base --is-ancestor HEAD "$remembered_branch"; then
+    printf '%s\n' "$remembered_branch"
     return 0
   fi
 
@@ -1384,9 +1407,10 @@ if [[ -n "$TARGET_BRANCH" ]]; then
     BRANCHES_TO_CHECK REMOTE_BRANCHES_TO_CHECK REMOTE_ONLY
 elif [[ -z "$BRANCH_PATTERN" ]]; then
   # Default scope is the current branch's local and remote refs.
-  if ! has_local_branch "$ORIGINAL_BRANCH"; then
+  if ! has_local_branch "$ORIGINAL_BRANCH" && \
+    ! has_remote_branch "$ORIGINAL_BRANCH"; then
     bt_error_exit "$EXIT_NOT_FOUND" \
-      "Current branch $ORIGINAL_BRANCH not found locally."
+      "Current branch $ORIGINAL_BRANCH not found locally or on origin."
   fi
 
   bt_collect_lsbranch_mode_branches current "$TARGET_BRANCH" \

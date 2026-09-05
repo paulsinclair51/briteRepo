@@ -178,6 +178,30 @@ git switch "$snapshot_branch" >/dev/null 2>&1 || \
   fail "could not restore branch after remote snapshot fixture"
 pass "current remote snapshot status"
 
+# A detached local branch commit resolves to its unique local branch name.
+git switch --detach "$snapshot_branch" >/dev/null 2>&1 || \
+  fail "could not create local detached snapshot fixture"
+rc=$(run_capture "$TMPDIR/local-detached-snapshot.out" "$LSBRANCH")
+[[ "$rc" -eq 0 ]] || fail "local detached snapshot status should exit 0"
+grep -Fq "${snapshot_branch} [current]" \
+  "$TMPDIR/local-detached-snapshot.out" || \
+  fail "local detached snapshot should resolve to its local branch"
+git switch "$snapshot_branch" >/dev/null 2>&1 || \
+  fail "could not restore branch after local detached snapshot fixture"
+pass "local detached snapshot status"
+
+# A remembered chbranch selection disambiguates a detached shared commit.
+git config --local chbranch.lastBranch v1.0.0
+git switch --detach "$snapshot_branch" >/dev/null 2>&1 || \
+  fail "could not create ambiguous detached snapshot fixture"
+rc=$(run_capture "$TMPDIR/remembered-detached-snapshot.out" "$LSBRANCH")
+[[ "$rc" -eq 0 ]] || fail "remembered detached snapshot status should exit 0"
+grep -Fq "v1.0.0 [current]" "$TMPDIR/remembered-detached-snapshot.out" || \
+  fail "remembered branch should disambiguate a detached shared commit"
+git switch "$snapshot_branch" >/dev/null 2>&1 || \
+  fail "could not restore branch after ambiguous detached snapshot fixture"
+pass "remembered detached snapshot status"
+
 # Internal r- branches are hidden and displayed through their source branch.
 git branch -f "r-$snapshot_branch" "$snapshot_branch" >/dev/null 2>&1 || \
   fail "could not create internal remote snapshot branch"
@@ -198,6 +222,35 @@ git switch "$snapshot_branch" >/dev/null 2>&1 || \
 git branch -D "r-$snapshot_branch" >/dev/null 2>&1 || \
   fail "could not remove internal remote snapshot fixture"
 pass "internal remote snapshot display"
+
+# A current r- snapshot may be the only local ref for a remote-only branch.
+REMOTE_ONLY_FETCH_BIN="$TMPDIR/remote-only-fetch-bin"
+mkdir -p "$REMOTE_ONLY_FETCH_BIN"
+cat > "$REMOTE_ONLY_FETCH_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == fetch ]]; then
+  exit 0
+fi
+exec "${REAL_GIT:?}" "$@"
+EOF
+chmod +x "$REMOTE_ONLY_FETCH_BIN/git"
+git update-ref refs/remotes/origin/dev/remote-only HEAD
+STATUS_TEST_REFS+=(refs/remotes/origin/dev/remote-only)
+git branch -f r-dev/remote-only origin/dev/remote-only >/dev/null 2>&1 || \
+  fail "could not create remote-only snapshot fixture"
+git switch r-dev/remote-only >/dev/null 2>&1 || \
+  fail "could not select remote-only snapshot fixture"
+rc=$(run_capture "$TMPDIR/remote-only-snapshot.out" \
+  env PATH="$REMOTE_ONLY_FETCH_BIN:$PATH" REAL_GIT="$REAL_GIT" "$LSBRANCH")
+[[ "$rc" -eq 0 ]] || fail "remote-only snapshot status should exit 0 (got $rc)"
+grep -Fq "dev/remote-only [current] [remote copy] [read-only]" \
+  "$TMPDIR/remote-only-snapshot.out" || \
+  fail "remote-only snapshot should be shown as a current remote copy"
+git switch "$snapshot_branch" >/dev/null 2>&1 || \
+  fail "could not restore branch after remote-only snapshot fixture"
+git branch -D r-dev/remote-only >/dev/null 2>&1 || \
+  fail "could not remove remote-only snapshot fixture"
+pass "remote-only snapshot status"
 
 # 8) BRANCH mode allows only -v; local/remote filters are
 # invalid in BRANCH mode

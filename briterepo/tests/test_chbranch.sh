@@ -12,9 +12,13 @@ export LC_ALL=C
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CHBRANCH_SRC="$REPO_ROOT/briterepo/bin/chbranch"
+LSBRANCH_SRC="$REPO_ROOT/briterepo/bin/lsbranch"
 COMMON_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/common.sh"
 GIT_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/git_helpers.sh"
+GITHUB_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/github_helpers.sh"
 HISTORY_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/history_log.sh"
+REPORT_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/report_helpers.sh"
+BRANCH_STATUS_HELPER_SRC="$REPO_ROOT/briterepo/bin/helpers/branch_status.sh"
 
 pass() {
   echo "PASS: $1"
@@ -92,10 +96,14 @@ git clone "$ORIGIN" "$WORK" >/dev/null 2>&1
 
 mkdir -p "$WORK/briterepo/bin" "$WORK/briterepo/bin/helpers"
 cp "$CHBRANCH_SRC" "$WORK/briterepo/bin/chbranch"
+cp "$LSBRANCH_SRC" "$WORK/briterepo/bin/lsbranch"
 cp "$COMMON_HELPER_SRC" "$WORK/briterepo/bin/helpers/common.sh"
 cp "$GIT_HELPER_SRC" "$WORK/briterepo/bin/helpers/git_helpers.sh"
+cp "$GITHUB_HELPER_SRC" "$WORK/briterepo/bin/helpers/github_helpers.sh"
 cp "$HISTORY_HELPER_SRC" "$WORK/briterepo/bin/helpers/history_log.sh"
-chmod +x "$WORK/briterepo/bin/chbranch"
+cp "$REPORT_HELPER_SRC" "$WORK/briterepo/bin/helpers/report_helpers.sh"
+cp "$BRANCH_STATUS_HELPER_SRC" "$WORK/briterepo/bin/helpers/branch_status.sh"
+chmod +x "$WORK/briterepo/bin/chbranch" "$WORK/briterepo/bin/lsbranch"
 
 (
   cd "$WORK"
@@ -240,6 +248,16 @@ assert_contains "dev/local-only" \
   fail "successful selection should not write to stderr"
 pass "current local branch"
 
+(
+  cd "$WORK"
+  bash "$WORK/briterepo/bin/lsbranch" > "$TMPDIR/lsbranch-summary.out"
+)
+rc=$(run_in_work_capture "$TMPDIR/chbranch-summary.out" dev/local-only)
+[[ "$rc" -eq 0 ]] || fail "summary comparison selection should exit 0 (got $rc)"
+cmp -s "$TMPDIR/lsbranch-summary.out" "$TMPDIR/chbranch-summary.out" || \
+  fail "chbranch summary should match lsbranch output"
+pass "summary matches lsbranch"
+
 # Omitting BRANCH defaults to the current local branch.
 rc=$(run_in_work_capture "$TMPDIR/implicit-current.out")
 [[ "$rc" -eq 0 ]] || fail "implicit current branch should exit 0 (got $rc)"
@@ -368,7 +386,7 @@ rc=$(run_in_work_capture "$TMPDIR/dirty-switch.out" dev/target)
 assert_contains "has uncommitted changes" "$TMPDIR/dirty-switch.out"
 rc=$(run_in_work_capture "$TMPDIR/dirty-current.out" dev/local-only)
 [[ "$rc" -eq 0 ]] || fail "dirty current branch should exit 0 (got $rc)"
-assert_contains "[current] [local only] [uncommitted]" \
+assert_contains "[current] [uncommitted] [local only]" \
   "$TMPDIR/dirty-current.out"
 (
   cd "$WORK"
@@ -458,7 +476,7 @@ pass "unavailable parent status"
 echo "uncommitted tracked change" >> "$WORK/README.md"
 rc=$(run_in_work_capture "$TMPDIR/local-uncommitted.out" dev/target)
 [[ "$rc" -eq 0 ]] || fail "uncommitted current branch should exit 0 (got $rc)"
-assert_contains "[current] [local] [uncommitted]" \
+assert_contains "[current] [uncommitted] [local]" \
   "$TMPDIR/local-uncommitted.out"
 for internal_status in staged unstaged; do
   if grep -Fq "[$internal_status]" "$TMPDIR/local-uncommitted.out"; then
@@ -498,9 +516,8 @@ pass "remote branch switch"
 
 rc=$(run_in_work_capture "$TMPDIR/remote-refreshed.out" -r dev/target)
 [[ "$rc" -eq 0 ]] || fail "remote snapshot refresh should exit 0 (got $rc)"
-assert_contains "dev/target [current] [remote copy] [refreshed] [read-only]" \
+assert_contains "dev/target [current] [remote copy] [read-only]" \
   "$TMPDIR/remote-refreshed.out"
-assert_contains "[refreshed]" "$TMPDIR/remote-refreshed.out"
 pass "current remote snapshot refresh status"
 
 # Refreshing the current remote copy requires a clean worktree.
@@ -794,7 +811,6 @@ set -e
 [[ "$rc" -eq 0 ]] || fail "protected refresh timeout should exit 0 (got $rc)"
 assert_contains "was not refreshed because the remote request timed out" \
   "$TMPDIR/protected-timeout.out"
-assert_contains "[offline]" "$TMPDIR/protected-timeout.out"
 pass "protected refresh timeout warning"
 
 # Restore the disposable main branch fixture for subsequent policy tests.
