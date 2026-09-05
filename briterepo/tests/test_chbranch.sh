@@ -313,6 +313,34 @@ rc=$(run_in_work_capture "$TMPDIR/current-local-history.out" dev/local-only)
   "$local_forward_before" ]] || fail "same local branch should preserve next history"
 pass "same local branch preserves navigation history"
 
+# A metadata-write failure must not turn a completed branch selection into an error.
+CONFIG_FAIL_BIN="$TMPDIR/config-fail-bin"
+mkdir -p "$CONFIG_FAIL_BIN"
+cat > "$CONFIG_FAIL_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == config ]]; then
+  echo "simulated config failure" >&2
+  exit 1
+fi
+exec "${REAL_GIT:?}" "$@"
+EOF
+chmod +x "$CONFIG_FAIL_BIN/git"
+set +e
+(
+  cd "$WORK"
+  PATH="$CONFIG_FAIL_BIN:$PATH" REAL_GIT="$REAL_GIT" \
+    bash "$WORK/briterepo/bin/chbranch" dev/target
+) >"$TMPDIR/history-write-failure.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]] || fail "history-write failure should preserve branch selection (got $rc)"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/target" ]] || \
+  fail "history-write failure should still change the branch"
+assert_contains "navigation history could not be saved" \
+  "$TMPDIR/history-write-failure.out"
+git -C "$WORK" switch dev/local-only >/dev/null 2>&1
+pass "history-write failure preserves branch selection"
+
 (
   cd "$WORK"
   bash "$WORK/briterepo/bin/lsbranch" > "$TMPDIR/lsbranch-summary.out"
@@ -408,6 +436,10 @@ rc=$(run_in_work_capture "$TMPDIR/child-parent-stale.out" -c)
 [[ "$rc" -eq 0 ]] || fail "stale child selection should exit 0 (got $rc)"
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "v1.0.0" ]] || \
   fail "-c should ignore a branch that is not a child of the current branch"
+if git -C "$WORK" config --local --get-all chbranch.lastChild | \
+  grep -Fqx $'v1.0.0\tdev/local-only'; then
+  fail "-c should remove an invalid remembered child"
+fi
 (
   cd "$WORK"
   git switch dev/nav-parent-v1.0.0 >/dev/null 2>&1
