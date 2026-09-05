@@ -532,7 +532,9 @@ assert_contains "requires a contributor or targeted parent branch" \
 rc=$(run_pushup "$TMPDIR/owner-version-branch.out" \
   "GITHUB_ACTOR=testowner" "FAKE_REPO_OWNER=testowner" -- -o -d)
 [[ "$rc" -eq 8 ]] || fail "-o from a version branch should exit 8 (got $rc)"
-assert_contains "requires the current branch to be a targeted branch" \
+assert_contains "available only from a local targeted branch" \
+  "$TMPDIR/owner-version-branch.out"
+assert_contains "use chbranch to select a local targeted branch" \
   "$TMPDIR/owner-version-branch.out"
 
 (
