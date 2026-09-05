@@ -225,8 +225,9 @@ get_repo_info() {
   origin_url=$(git config --get remote.origin.url 2>/dev/null || true)
   
   if [[ -z "$origin_url" ]]; then
-    bt_error_exit "$EXIT_INTERNAL_ERROR" \
-      "Cannot determine repository URL from git config"
+    bt_emit_prerequisite_failure "$EXIT_INTERNAL_ERROR" \
+      "No remote repository URL is configured" \
+      "configure a GitHub remote URL or contact the repository owner"
   fi
   
   # Extract owner and repo from URL (supports both HTTPS and SSH)
@@ -234,8 +235,9 @@ get_repo_info() {
     REPO_OWNER="${BASH_REMATCH[1]}"
     REPO_NAME="${BASH_REMATCH[2]}"
   else
-    bt_error_exit "$EXIT_INTERNAL_ERROR" \
-      "Cannot parse repository URL: $origin_url"
+    bt_emit_prerequisite_failure "$EXIT_INTERNAL_ERROR" \
+      "Remote URL is not a supported GitHub URL: $origin_url" \
+      "configure a GitHub remote URL or contact the repository owner"
   fi
   
   if [[ "$VERBOSE" == "true" ]]; then

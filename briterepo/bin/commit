@@ -1447,9 +1447,7 @@ if ! is_contributor_or_higher "$ACTOR_LOGIN"; then
     "$(printf '%s%s' \
       "User '$ACTOR_LOGIN' is not authorized to run commit (requires " \
       "contributor role or higher)")" \
-    "$(printf '%s%s' \
-      "use an account and merge path authorized by repository policy, then " \
-      "rerun commit")"
+    "contact an approver or repository owner"
 fi
 
 resolve_actor_role_label

@@ -109,6 +109,7 @@ readonly EXIT_ACTIVE=2
 readonly EXIT_PREPUBLICATION_FAILED=4
 readonly EXIT_PARTIAL=5
 readonly EXIT_INTERNAL=200
+readonly EXIT_OWNER_OVERRIDE_INVALID_BRANCH=8
 readonly STATE_VERSION=2
 readonly REMOTE_REACCESS_MULTIPLIER=3
 
@@ -993,10 +994,17 @@ ensure_tool_snapshot
 
 phase="$(state_get phase)"
 if [[ "$phase" == initialized ]]; then
-  if ! prepare_parent; then
+  if prepare_parent; then
+    set_phase parent-prepared
+  else
+    prepare_status=$?
+    if [[ "$prepare_status" -eq "$EXIT_OWNER_OVERRIDE_INVALID_BRANCH" ]]; then
+      rm -f "$STATE_FILE"
+      remove_tool_snapshot
+      exit "$EXIT_PREPUBLICATION_FAILED"
+    fi
     fail_before_publication "merge-up prerequisites failed or local preparation did not complete"
   fi
-  set_phase parent-prepared
 fi
 
 if [[ "$(state_get phase)" == parent-prepared ]]; then

@@ -207,7 +207,7 @@ pass "toolchain preflight"
 rc=$(run_capture "$TMPDIR/unauth.out" env GITHUB_ACTOR=outsider bash -lc "cd '$WORK' && bash ./briterepo/bin/push -d -t 5")
 [[ "$rc" -eq 2 ]] || fail "unauthorized push should exit 2 (got $rc)"
 assert_contains "Error: User is not a contributor" "$TMPDIR/unauth.out"
-assert_contains "Guidance: use an account and merge path authorized by repository policy" "$TMPDIR/unauth.out"
+assert_contains "Guidance: contact an approver or repository owner" "$TMPDIR/unauth.out"
 (
   cd "$WORK"
   git config user.name "testuser"

@@ -571,21 +571,21 @@ acquire_run_lock() {
 
   existing_pid="$(cat "$LOCK_FILE" 2>/dev/null || true)"
   if [[ "$existing_pid" =~ ^[0-9]+$ ]]; then
-    bt_error_exit "$EXIT_RUN_LOCKED" \
-      "Another pushup run appears active (pid $existing_pid). Verify with" \
-      "'ps -p $existing_pid -o comm='. If no pushup process is running," \
-      "remove stale lock '.git/pushup.run.lock' and rerun pushup"
+    bt_emit_prerequisite_failure "$EXIT_RUN_LOCKED" \
+      "Another pushup run appears active (pid $existing_pid)" \
+      "wait for it to finish, or contact an approver or repository owner"
   fi
 
-  bt_error_exit "$EXIT_RUN_LOCKED" "Another pushup run appears active. If no run is active, remove " \
-    "stale lock '.git/pushup.run.lock' and rerun pushup"
+  bt_emit_prerequisite_failure "$EXIT_RUN_LOCKED" \
+    "Another pushup run appears active" \
+    "wait for it to finish, or contact an approver or repository owner"
 }
 
 release_run_lock() {
   if [[ "$LOCK_HELD" == true && -n "$LOCK_FILE" ]]; then
     if ! rm -f "$LOCK_FILE" >/dev/null 2>&1; then
-      echo "Warning: failed to remove pushup lock '$LOCK_FILE'; remove it" \
-           "manually before the next run." >&2
+       echo "Warning: Could not remove the pushup lock. Contact an approver or" \
+         "repository owner before running pushup again." >&2
       return 1
     fi
     LOCK_HELD=false
@@ -621,14 +621,13 @@ print_failure_guidance() {
                        "then rerun pushup"
       ;;
     "$EXIT_REMOTE_UNCONFIGURED")
-      bt_emit_guidance_joined "configure the origin remote, then rerun pushup"
+      bt_emit_guidance_joined "configure the remote repository, then rerun pushup"
       ;;
     "$EXIT_REMOTE_UNREACHABLE"|"$EXIT_REMOTE_TIMEOUT")
-      bt_emit_guidance_joined "restore remote connectivity (origin) and rerun pushup"
+      bt_emit_guidance_joined "restore remote connectivity, then rerun pushup"
       ;;
     "$EXIT_NOT_REPOSITORY_OWNER"|"$EXIT_NOT_CONTRIBUTOR"|"$EXIT_NOT_APPROVER")
-      bt_emit_guidance_joined "use an account and merge path authorized by" \
-                       "repository policy, then rerun pushup"
+      bt_emit_guidance_joined "contact an approver or repository owner"
       ;;
     "$EXIT_OWNER_OVERRIDE_INVALID_BRANCH")
       bt_emit_guidance_joined "use chbranch to select a local targeted branch," \
@@ -640,8 +639,7 @@ print_failure_guidance() {
       ;;
     "$EXIT_RUN_LOCKED")
       bt_emit_guidance_joined "wait for the active pushup process to finish, or" \
-                       "remove a stale lock after verifying no process is" \
-                       "active"
+                       "contact an approver or repository owner"
       ;;
     "$EXIT_GIT_OPERATION_FAILED")
       bt_emit_guidance_joined "if merge conflicts occurred, resolve conflicts," \

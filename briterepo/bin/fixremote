@@ -222,8 +222,9 @@ require_approver_role() {
   local actor_email=""
 
   actor_login="$(bt_require_login 2>/dev/null || true)"
-  [[ -n "$actor_login" ]] || bt_error_exit "$EXIT_UNAUTHORIZED" \
-    "User is not authorized to run fixremote (requires approver/owner role)."
+  [[ -n "$actor_login" ]] || bt_emit_prerequisite_failure "$EXIT_UNAUTHORIZED" \
+    "Unable to determine your GitHub login for fixremote" \
+    "sign in with gh auth login, then rerun fixremote"
 
   actor_email="$(git -C "$REPO_ROOT" config user.email 2>/dev/null || true)"
 
@@ -233,8 +234,9 @@ require_approver_role() {
     bt_is_repository_owner_login "$actor_login"; then
     return 0
   fi
-  bt_error_exit "$EXIT_UNAUTHORIZED" \
-    "User is not authorized to run fixremote (requires approver/owner role)."
+  bt_emit_prerequisite_failure "$EXIT_UNAUTHORIZED" \
+    "You are not authorized to run fixremote" \
+    "contact an approver or repository owner"
 }
 
 init_error_report() {
