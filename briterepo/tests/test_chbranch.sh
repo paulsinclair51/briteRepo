@@ -70,7 +70,7 @@ assert_matches() {
   grep -Eq -- "$pattern" "$file" || fail "expected pattern '$pattern' in $file"
 }
 
-for dep in bash git grep mktemp timeout; do
+for dep in bash git grep mktemp timeout flock; do
   command -v "$dep" >/dev/null 2>&1 || fail "missing required command: $dep"
 done
 
@@ -156,7 +156,12 @@ assert_contains "[retarget in progress]" "$TMPDIR/help.out"
 assert_contains "[pulldown in progress]" "$TMPDIR/help.out"
 assert_contains "[parent NAME]" "$TMPDIR/help.out"
 assert_contains "[parent unavailable NAME]" "$TMPDIR/help.out"
-assert_contains "-u" "$TMPDIR/help.out"
+assert_contains "-c          Change to the most recently selected branch in the child stack." \
+  "$TMPDIR/help.out"
+assert_contains "-b returns to the immediately previous branch. -c follows the selection" \
+  "$TMPDIR/help.out"
+assert_contains "history below the current branch; use -p to select the branch's parent." \
+  "$TMPDIR/help.out"
 assert_matches '^[[:space:]]*3[[:space:]]+Branch not found, no previous branch is recorded, no branch stack entry$' \
   "$TMPDIR/help.out"
 assert_matches '^[[:space:]]*8[[:space:]]+Running outside a Git repository\.$' \
@@ -207,6 +212,22 @@ rc=$(run_in_work_capture "$TMPDIR/invalid-branch.out" 'bad..branch')
 [[ "$rc" -eq 1 ]] || fail "invalid branch name should exit 1 (got $rc)"
 assert_contains "Invalid branch name" "$TMPDIR/invalid-branch.out"
 pass "argument validation"
+
+# Concurrent chbranch commands must not race checkout or navigation updates.
+CHBRANCH_LOCK="$WORK/.git/briteRepo/chbranch.lock"
+mkdir -p "$(dirname "$CHBRANCH_LOCK")"
+set +e
+(
+  cd "$WORK"
+  flock "$CHBRANCH_LOCK" bash "$WORK/briterepo/bin/chbranch" dev/target
+) >"$TMPDIR/locked.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 10 ]] || fail "locked chbranch should exit 10 (got $rc)"
+assert_contains "Another chbranch operation is active" "$TMPDIR/locked.out"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
+  fail "locked chbranch must not change the current branch"
+pass "concurrent chbranch is blocked"
 
 # Navigation target resolution failures use exit 3.
 rc=$(run_in_work_capture "$TMPDIR/back-missing-history.out" -b)
@@ -549,6 +570,39 @@ assert_contains "[current] [remote copy] [read-only]" \
 [[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "r-dev/target" ]] || \
   fail "expected named local remote copy in remote mode"
 pass "remote branch switch"
+
+# A fetch failure after a successful remote lookup is retried once with a
+# timeout three times the requested value.
+RETRY_TIMEOUT_BIN="$TMPDIR/retry-timeout-bin"
+RETRY_FETCH_LOG="$TMPDIR/retry-fetch-timeouts"
+mkdir -p "$RETRY_TIMEOUT_BIN"
+cat > "$RETRY_TIMEOUT_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == "fetch" ]]; then
+    printf '%s\n' "$1" >> "${RETRY_FETCH_LOG:?}"
+    [[ "$(wc -l < "${RETRY_FETCH_LOG:?}")" -gt 1 ]] || exit 1
+    break
+  fi
+done
+exec "${REAL_TIMEOUT:?}" "$@"
+EOF
+chmod +x "$RETRY_TIMEOUT_BIN/timeout"
+set +e
+(
+  cd "$WORK"
+  PATH="$RETRY_TIMEOUT_BIN:$PATH" REAL_TIMEOUT="$REAL_TIMEOUT" \
+    RETRY_FETCH_LOG="$RETRY_FETCH_LOG" \
+    bash "$WORK/briterepo/bin/chbranch" -r -t 1 dev/target
+) >"$TMPDIR/remote-retry.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]] || fail "remote fetch retry should exit 0 (got $rc)"
+[[ "$(sed -n '1p' "$RETRY_FETCH_LOG")" == "1s" ]] || \
+  fail "first remote fetch should use the requested timeout"
+[[ "$(sed -n '2p' "$RETRY_FETCH_LOG")" == "3s" ]] || \
+  fail "retry remote fetch should use triple the requested timeout"
+pass "remote fetch retry uses extended timeout"
 
 # Refreshing the current remote copy must not alter -b or -u history.
 (
@@ -962,6 +1016,7 @@ mkdir -p "$FAKE_GIT_BIN"
 cat > "$FAKE_GIT_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "switch" ]]; then
+  echo "simulated git switch failure" >&2
   exit 1
 fi
 exec "${REAL_GIT:?}" "$@"
@@ -978,6 +1033,7 @@ set -e
 [[ "$rc" -eq 200 ]] || fail "Git switch failure should exit 200 (got $rc)"
 assert_contains "Failed to switch to local branch 'dev/target'" \
   "$TMPDIR/switch-failure.out"
+assert_contains "simulated git switch failure" "$TMPDIR/switch-failure.out"
 pass "Git switch failure exit"
 
 # Default remote mode must verify connectivity even when a cached ref exists.
