@@ -121,16 +121,23 @@ cat > "$WORK/briterepo/bin/helpers/pushup_parent.sh" <<'EOF'
 set -e
 dry_run=false
 error_run=false
+owner_override=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d) dry_run=true; shift ;;
     -e) error_run=true; shift ;;
     -t|-c) shift 2 ;;
-    -o|-v) shift ;;
+    -o) owner_override=true; shift ;;
+    -v) shift ;;
     --) shift; break ;;
     *) shift ;;
   esac
 done
+if [[ "$owner_override" == true ]]; then
+  echo "Error: Option -o is available only from a local targeted branch." >&2
+  echo "Guidance: use chbranch to select a local targeted branch, then rerun pushup -o." >&2
+  exit 8
+fi
 if [[ "$dry_run" == true ]]; then
   echo "Dry-run: merge to local main: 1 modified file."
   exit 0
@@ -248,6 +255,22 @@ assert_contains "Merge-up skipped due to -e option" "$TMPDIR/error-run.out"
 [[ ! -f "$WORK/.git/briteRepo/pushup.state" ]] || \
   fail "top-level pushup -e should not write pushup state"
 echo "PASS: top-level error-run delegates without state"
+
+status="$(run_capture "$TMPDIR/owner-override-preflight.out" bash -c \
+  "cd '$WORK' && ./briterepo/bin/pushup -o")"
+[[ "$status" -eq 4 ]] || \
+  fail "owner override preflight should exit 4, got $status"
+assert_contains "Option -o is available only from a local targeted branch" \
+  "$TMPDIR/owner-override-preflight.out"
+assert_contains "use chbranch to select a local targeted branch" \
+  "$TMPDIR/owner-override-preflight.out"
+if grep -Fq "Push-up workflow not started" "$TMPDIR/owner-override-preflight.out" || \
+  grep -Fq "No local push-up changes were retained" "$TMPDIR/owner-override-preflight.out"; then
+  fail "owner override preflight should not report rollback activity"
+fi
+[[ ! -f "$WORK/.git/briteRepo/pushup.state" ]] || \
+  fail "owner override preflight should remove provisional state"
+echo "PASS: owner override preflight stays concise"
 
 # Local-only contributor/targeted paths update neither remote branch.
 git -C "$WORK" update-ref -d refs/remotes/origin/main
