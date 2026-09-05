@@ -626,10 +626,13 @@ print_failure_guidance() {
     "$EXIT_REMOTE_UNREACHABLE"|"$EXIT_REMOTE_TIMEOUT")
       bt_emit_guidance_joined "restore remote connectivity (origin) and rerun pushup"
       ;;
-    "$EXIT_NOT_REPOSITORY_OWNER"|"$EXIT_OWNER_OVERRIDE_INVALID_BRANCH"|\
-    "$EXIT_NOT_CONTRIBUTOR"|"$EXIT_NOT_APPROVER")
+    "$EXIT_NOT_REPOSITORY_OWNER"|"$EXIT_NOT_CONTRIBUTOR"|"$EXIT_NOT_APPROVER")
       bt_emit_guidance_joined "use an account and merge path authorized by" \
                        "repository policy, then rerun pushup"
+      ;;
+    "$EXIT_OWNER_OVERRIDE_INVALID_BRANCH")
+      bt_emit_guidance_joined "use chbranch to select a local targeted branch," \
+                       "then rerun pushup -o"
       ;;
     "$EXIT_GITHUB_IDENTITY_FAILED"|"$EXIT_GITHUB_PR_QUERY_FAILED")
       bt_emit_guidance_joined "verify GitHub CLI authentication and access, then" \
@@ -1765,7 +1768,7 @@ if [[ "$OWNER_OVERRIDE" == true ]]; then
   fi
   if ! is_targeted_branch "$CURRENT_BRANCH"; then
     bt_error_exit "$EXIT_OWNER_OVERRIDE_INVALID_BRANCH" \
-      "Option -o requires the current branch to be a targeted branch"
+      "Option -o is available only from a local targeted branch"
   fi
 fi
 
