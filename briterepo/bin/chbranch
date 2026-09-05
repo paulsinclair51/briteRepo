@@ -142,7 +142,7 @@ Exit codes:
   7    Timeout waiting for remote to be reachable.
   8    Running outside a Git repository.
   9    Required command is not available (git or timeout).
-  10   Another chbranch operation is active for this repository.
+  10   Another branch-changing operation is active for this repository.
   200  Git failed to change branches.
 EOF
 }
@@ -150,7 +150,7 @@ EOF
 # High-Level Flow:
 # 1. Honor help before validating the environment.
 # 2. Verify required commands and Git repository context.
-# 3. Acquire the branch-selection lock.
+# 3. Acquire branch-selection and active pushup locks.
 # 4. Parse options and resolve BRANCH.
 #    - If BRANCH is omitted, resolve the current local branch or remote
 #      snapshot; if state is ambiguous, use the last successfully
@@ -206,6 +206,7 @@ readonly REMOTE_REACCESS_MULTIPLIER=3
 VERBOSE=false
 REMOTE_TIMEOUT_SECONDS=10
 CHBRANCH_LOCK_FD=""
+PUSHUP_LOCK_FD=""
 readonly LAST_BRANCH_KEY="chbranch.lastBranch"
 readonly PREVIOUS_BRANCH_KEY="chbranch.previousBranch"
 readonly BRANCH_STACK_KEY="chbranch.branchStack"
@@ -274,11 +275,38 @@ acquire_chbranch_lock() {
   fi
 }
 
+acquire_pushup_lock() {
+  local lock_file=""
+
+  lock_file="$(git rev-parse --git-path briteRepo/pushup.lock 2>/dev/null || true)"
+  [[ -n "$lock_file" ]] || bt_error_exit "$EXIT_CHANGE_FAILED" \
+    "Failed to create the pushup lock path"
+  mkdir -p "$(dirname "$lock_file")" || \
+    bt_error_exit "$EXIT_CHANGE_FAILED" "Failed to create the pushup lock directory"
+  exec {PUSHUP_LOCK_FD}>"$lock_file"
+  if ! flock -n "$PUSHUP_LOCK_FD"; then
+    bt_error_exit "$EXIT_LOCKED" \
+      "A pushup operation is active for this repository"
+  fi
+}
+
 release_chbranch_lock() {
   [[ -n "$CHBRANCH_LOCK_FD" ]] || return 0
   flock -u "$CHBRANCH_LOCK_FD" 2>/dev/null || true
   eval "exec ${CHBRANCH_LOCK_FD}>&-"
   CHBRANCH_LOCK_FD=""
+}
+
+release_pushup_lock() {
+  [[ -n "$PUSHUP_LOCK_FD" ]] || return 0
+  flock -u "$PUSHUP_LOCK_FD" 2>/dev/null || true
+  eval "exec ${PUSHUP_LOCK_FD}>&-"
+  PUSHUP_LOCK_FD=""
+}
+
+release_locks() {
+  release_chbranch_lock
+  release_pushup_lock
 }
 
 branch_exists_local() {
@@ -863,8 +891,9 @@ main() {
   ensure_required_commands
   parse_args "$@"
   ensure_git_repository
+  acquire_pushup_lock
   acquire_chbranch_lock
-  trap release_chbranch_lock EXIT
+  trap release_locks EXIT
   resolve_navigation_branch
   export BT_REMOTE_TIMEOUT_SECONDS="$REMOTE_TIMEOUT_SECONDS"
 

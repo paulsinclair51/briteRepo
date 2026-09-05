@@ -229,6 +229,21 @@ assert_contains "Another chbranch operation is active" "$TMPDIR/locked.out"
   fail "locked chbranch must not change the current branch"
 pass "concurrent chbranch is blocked"
 
+# chbranch must not race branch-changing pushup workflow operations.
+PUSHUP_LOCK="$WORK/.git/briteRepo/pushup.lock"
+set +e
+(
+  cd "$WORK"
+  flock "$PUSHUP_LOCK" bash "$WORK/briterepo/bin/chbranch" dev/target
+) >"$TMPDIR/pushup-locked.out" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 10 ]] || fail "pushup-locked chbranch should exit 10 (got $rc)"
+assert_contains "A pushup operation is active" "$TMPDIR/pushup-locked.out"
+[[ "$(git -C "$WORK" symbolic-ref -q --short HEAD)" == "dev/local-only" ]] || \
+  fail "pushup-locked chbranch must not change the current branch"
+pass "active pushup blocks chbranch"
+
 # Navigation target resolution failures use exit 3.
 rc=$(run_in_work_capture "$TMPDIR/back-missing-history.out" -b)
 [[ "$rc" -eq 3 ]] || fail "-b without previous branch should exit 3 (got $rc)"
