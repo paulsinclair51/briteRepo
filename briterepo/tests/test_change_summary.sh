@@ -88,6 +88,10 @@ bt_git_collect_change_summary_from_files \
 [[ "$BT_CHANGE_RENAMED_DIRECTORIES" -eq 2 ]] || \
   fail "renamed directory count"
 
+expected_directory_rows=$'gone-dir|Deleted\nsplit-old|Deleted\nnew-dir|Added\nsplit-new-a|Added\nsplit-new-b|Added\nrename-mod-new|Renamed (was rename-mod-old)\nrename-new|Renamed (was rename-old)'
+[[ "$(printf '%s\n' "${BT_CHANGE_DIRECTORY_ROWS[@]}")" == \
+  "$expected_directory_rows" ]] || fail "directory row order"
+
 expected="1 modified file, 2 deleted files, 2 added files, 3 renamed files, 1 renamed/modified file, 2 deleted directories, 3 added directories and 2 renamed directories"
 [[ "$(bt_format_change_summary)" == "$expected" ]] || \
   fail "comprehensive summary formatting"
@@ -96,5 +100,92 @@ bt_git_reset_change_summary
 BT_CHANGE_ADDED_FILES=1
 [[ "$(bt_format_change_summary)" == "1 added file" ]] || \
   fail "zero suppression and singular formatting"
+
+# Ref and worktree wrappers resolve their own inputs, so exercise them against
+# a real repository rather than prepared file lists.
+REPO="$TMPDIR/repo"
+git init -q -b main "$REPO"
+git -C "$REPO" config user.name "Change Summary Test"
+git -C "$REPO" config user.email "change-summary@example.com"
+
+mkdir -p "$REPO/keep" "$REPO/old-dir" "$REPO/skip-dir" "$REPO/space dir"
+printf 'same\n' > "$REPO/keep/same.txt"
+printf 'moved\n' > "$REPO/old-dir/moved.txt"
+printf 'gone\n' > "$REPO/keep/deleted.txt"
+printf 'skip\n' > "$REPO/skip-dir/ignored.txt"
+printf 'spaced\n' > "$REPO/space dir/spaced name.txt"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm base
+base_ref="$(git -C "$REPO" rev-parse HEAD)"
+
+mkdir -p "$REPO/new-dir"
+git -C "$REPO" mv old-dir/moved.txt new-dir/moved.txt
+git -C "$REPO" rm -q keep/deleted.txt
+printf 'changed\n' >> "$REPO/keep/same.txt"
+printf 'added\n' > "$REPO/keep/added.txt"
+printf 'changed\n' >> "$REPO/space dir/spaced name.txt"
+printf 'skipped\n' >> "$REPO/skip-dir/ignored.txt"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm change
+head_ref="$(git -C "$REPO" rev-parse HEAD)"
+
+cd "$REPO"
+
+bt_git_collect_ref_change_summary "$base_ref" "$head_ref" || \
+  fail "ref change summary should succeed for valid refs"
+[[ "$BT_CHANGE_MODIFIED_FILES" -eq 3 ]] || \
+  fail "ref summary modified count (got $BT_CHANGE_MODIFIED_FILES)"
+[[ "$BT_CHANGE_DELETED_FILES" -eq 1 ]] || \
+  fail "ref summary deleted count (got $BT_CHANGE_DELETED_FILES)"
+[[ "$BT_CHANGE_ADDED_FILES" -eq 1 ]] || \
+  fail "ref summary added count (got $BT_CHANGE_ADDED_FILES)"
+[[ "$BT_CHANGE_RENAMED_FILES" -eq 1 ]] || \
+  fail "ref summary renamed count (got $BT_CHANGE_RENAMED_FILES)"
+[[ "$BT_CHANGE_RENAMED_DIRECTORIES" -eq 1 ]] || \
+  fail "ref summary renamed directory count (got $BT_CHANGE_RENAMED_DIRECTORIES)"
+[[ "$BT_CHANGE_DELETED_DIRECTORIES" -eq 0 ]] || \
+  fail "renamed source directory must not count as deleted"
+[[ "$BT_CHANGE_ADDED_DIRECTORIES" -eq 0 ]] || \
+  fail "renamed target directory must not count as added"
+
+# Excluded pathspecs drop matching files from the counts.
+bt_git_collect_ref_change_summary "$base_ref" "$head_ref" "skip-dir" || \
+  fail "ref change summary should succeed with exclusions"
+[[ "$BT_CHANGE_MODIFIED_FILES" -eq 2 ]] || \
+  fail "excluded path should not be counted (got $BT_CHANGE_MODIFIED_FILES)"
+
+# Directory renames are only inferred for unambiguous one-to-one moves.
+git checkout -q -b split-case "$base_ref"
+mkdir -p "$REPO/split-a" "$REPO/split-b"
+printf 'one\n' > "$REPO/old-dir/two.txt"
+git add -A
+git commit -qm "second file in old-dir"
+split_base="$(git rev-parse HEAD)"
+git mv old-dir/moved.txt split-a/moved.txt
+git mv old-dir/two.txt split-b/two.txt
+git add -A
+git commit -qm "split old-dir"
+bt_git_collect_ref_change_summary "$split_base" "$(git rev-parse HEAD)" || \
+  fail "split summary should succeed"
+[[ "$BT_CHANGE_RENAMED_DIRECTORIES" -eq 0 ]] || \
+  fail "ambiguous split must not be reported as a directory rename"
+[[ "$BT_CHANGE_DELETED_DIRECTORIES" -eq 1 ]] || \
+  fail "split source directory should count as deleted"
+[[ "$BT_CHANGE_ADDED_DIRECTORIES" -eq 2 ]] || \
+  fail "split target directories should count as added"
+
+# The worktree wrapper counts uncommitted and untracked changes.
+git checkout -q main
+printf 'dirty\n' >> "$REPO/keep/same.txt"
+printf 'untracked\n' > "$REPO/keep/untracked.txt"
+bt_git_collect_worktree_change_summary
+[[ "$BT_CHANGE_MODIFIED_FILES" -eq 1 ]] || \
+  fail "worktree modified count (got $BT_CHANGE_MODIFIED_FILES)"
+[[ "$BT_CHANGE_ADDED_FILES" -eq 1 ]] || \
+  fail "worktree untracked file should count as added (got $BT_CHANGE_ADDED_FILES)"
+
+cd "$SCRIPT_DIR"
+
+echo "All change summary tests passed."
 
 echo "All change summary tests passed."
