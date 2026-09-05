@@ -354,7 +354,9 @@ remember_last_branch() {
   local branch="$1"
 
   [[ -n "$branch" ]] || return 0
-  git config --local "$LAST_BRANCH_KEY" "$branch" >/dev/null 2>&1 || true
+  if ! git config --local "$LAST_BRANCH_KEY" "$branch" >/dev/null 2>&1; then
+    bt_warn "Warning: Branch selected, but navigation history could not be saved."
+  fi
 }
 
 push_history_branch() {
@@ -362,13 +364,15 @@ push_history_branch() {
   local branch="$2"
 
   [[ -n "$branch" ]] || return 0
-  git config --local --add "$history_key" "$branch" >/dev/null 2>&1 || true
+  git config --local --add "$history_key" "$branch" >/dev/null 2>&1
 }
 
 clear_history() {
   local history_key="$1"
+  local rc=0
 
-  git config --local --unset-all "$history_key" >/dev/null 2>&1 || true
+  git config --local --unset-all "$history_key" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 0 || "$rc" -eq 5 ]]
 }
 
 last_child_for_parent_or_empty() {
@@ -401,12 +405,44 @@ remember_child_for_parent() {
     retained_mappings+=("$mapping")
   done < <(git config --local --get-all "$LAST_CHILD_KEY" 2>/dev/null || true)
 
-  git config --local --unset-all "$LAST_CHILD_KEY" >/dev/null 2>&1 || true
+  if ! clear_history "$LAST_CHILD_KEY"; then
+    bt_warn "Warning: Branch selected, but parent-child navigation could not be saved."
+    return 0
+  fi
   for mapping in "${retained_mappings[@]}"; do
-    git config --local --add "$LAST_CHILD_KEY" "$mapping" >/dev/null 2>&1 || true
+    if ! push_history_branch "$LAST_CHILD_KEY" "$mapping"; then
+      bt_warn "Warning: Branch selected, but parent-child navigation could not be saved."
+      return 0
+    fi
   done
-  git config --local --add "$LAST_CHILD_KEY" "$parent"$'\t'"$child" \
-    >/dev/null 2>&1 || true
+  if ! push_history_branch "$LAST_CHILD_KEY" "$parent"$'\t'"$child"; then
+    bt_warn "Warning: Branch selected, but parent-child navigation could not be saved."
+  fi
+}
+
+forget_child_for_parent() {
+  local parent="$1"
+  local mapping=""
+  local mapping_parent=""
+  local child=""
+  local -a retained_mappings=()
+
+  while IFS= read -r mapping; do
+    IFS=$'\t' read -r mapping_parent child <<< "$mapping"
+    [[ "$mapping_parent" == "$parent" ]] && continue
+    retained_mappings+=("$mapping")
+  done < <(git config --local --get-all "$LAST_CHILD_KEY" 2>/dev/null || true)
+
+  if ! clear_history "$LAST_CHILD_KEY"; then
+    bt_warn "Warning: Could not remove invalid parent-child navigation."
+    return 0
+  fi
+  for mapping in "${retained_mappings[@]}"; do
+    if ! push_history_branch "$LAST_CHILD_KEY" "$mapping"; then
+      bt_warn "Warning: Could not remove invalid parent-child navigation."
+      return 0
+    fi
+  done
 }
 
 top_history_branch_or_empty() {
@@ -442,11 +478,17 @@ pop_history_branch() {
     fi
   done < <(git config --local --get-all "$history_key" 2>/dev/null || true)
 
-  clear_history "$history_key"
+  if ! clear_history "$history_key"; then
+    bt_warn "Warning: Branch selected, but navigation history could not be saved."
+    return 0
+  fi
   index=$((${#branches[@]} - 1))
   for index in "${!branches[@]}"; do
     [[ "$index" -lt "$((${#branches[@]} - 1))" ]] || continue
-    push_history_branch "$history_key" "${branches[$index]}"
+    if ! push_history_branch "$history_key" "${branches[$index]}"; then
+      bt_warn "Warning: Branch selected, but navigation history could not be saved."
+      return 0
+    fi
   done
 }
 
@@ -458,16 +500,22 @@ remember_successful_selection() {
   if [[ -n "$previous_branch" && "$previous_branch" != "$branch" ]]; then
     case "$history_action" in
       new)
-        push_history_branch "$BACK_STACK_KEY" "$previous_branch"
-        clear_history "$FORWARD_STACK_KEY"
+        if ! push_history_branch "$BACK_STACK_KEY" "$previous_branch" || \
+          ! clear_history "$FORWARD_STACK_KEY"; then
+          bt_warn "Warning: Branch selected, but navigation history could not be saved."
+        fi
         ;;
       back)
         pop_history_branch "$BACK_STACK_KEY"
-        push_history_branch "$FORWARD_STACK_KEY" "$previous_branch"
+        if ! push_history_branch "$FORWARD_STACK_KEY" "$previous_branch"; then
+          bt_warn "Warning: Branch selected, but navigation history could not be saved."
+        fi
         ;;
       forward)
         pop_history_branch "$FORWARD_STACK_KEY"
-        push_history_branch "$BACK_STACK_KEY" "$previous_branch"
+        if ! push_history_branch "$BACK_STACK_KEY" "$previous_branch"; then
+          bt_warn "Warning: Branch selected, but navigation history could not be saved."
+        fi
         ;;
     esac
     if [[ "${RECORD_PARENT_CHILD:-false}" == true && \
@@ -863,6 +911,7 @@ resolve_navigation_branch() {
     child_branch="$(last_child_for_parent_or_empty "$base_branch")"
     if [[ -z "$child_branch" ]] || \
       [[ "$(bt_resolve_parent_branch "$child_branch" "")" != "$base_branch" ]]; then
+      [[ -z "$child_branch" ]] || forget_child_for_parent "$base_branch"
       BRANCH_ARG="$base_branch"
       NAVIGATION_NOOP=true
       return 0
